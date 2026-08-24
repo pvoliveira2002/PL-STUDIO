@@ -1,0 +1,80 @@
+{
+  "name": "pl-studio",
+  "private": true,
+  "version": "0.4.2",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "description": "Conversor e organizador de PDFs para Windows",
+  "author": "PL Studio",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "desktop:dev": "npm run build && electron .",
+    "desktop:build": "npm run build && electron-builder --win nsis portable"
+  },
+  "dependencies": {
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "latest",
+    "docx": "^9.7.1",
+    "electron": "latest",
+    "electron-builder": "latest",
+    "exceljs": "^4.4.0",
+    "jspdf": "^4.2.1",
+    "jszip": "latest",
+    "lucide-react": "latest",
+    "mammoth": "^1.12.1",
+    "pdf-lib": "latest",
+    "pdf-lib-plus-encrypt": "^1.1.0",
+    "pdfjs-dist": "^6.2.108",
+    "react": "latest",
+    "react-dom": "latest",
+    "tesseract.js": "^7.0.0",
+    "vite": "latest"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  },
+  "build": {
+    "appId": "com.plstudio.desktop",
+    "productName": "PL Studio",
+    "asar": true,
+    "directories": {
+      "output": "PL-Studio-0.4.2-Windows"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "public/brand/pdfly-symbol.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PL Studio",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Dependências e caches
+node_modules/
+.npm/
+
+# Builds web e desktop
+dist/
+*-Studio-*-Windows/
+win-unpacked/
+*.blockmap
+
+# Arquivos temporários e de QA
+tmp-*/
+*.log
+
+# Configurações locais e segredos
+.env
+.env.*
+!.env.example
+
+# Sistema e editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
