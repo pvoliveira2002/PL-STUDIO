@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('plStudio', {
   convertImages: (payload) => ipcRenderer.invoke('image:convert', payload),
   openFolder: (folderPath) => ipcRenderer.invoke('image:open-folder', folderPath),
   openDownloads: () => ipcRenderer.invoke('app:open-downloads'),
+  removeBackground: (filePath, options) => ipcRenderer.invoke('background:remove', filePath, options),
 });

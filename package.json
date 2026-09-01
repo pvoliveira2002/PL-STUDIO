@@ -14,7 +14,9 @@
     "desktop:build": "npm run build && electron-builder --win nsis portable"
   },
   "dependencies": {
-    "sharp": "^0.35.3"
+    "@imgly/background-removal-node": "1.4.3",
+    "sharp": "0.35.4",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "latest",
@@ -35,6 +37,10 @@
     "vite": "latest"
   },
   "overrides": {
+    "@imgly/background-removal-node": {
+      "sharp": "$sharp",
+      "zod": "$zod"
+    },
     "exceljs": {
       "uuid": "11.1.1"
     }
@@ -50,6 +56,10 @@
       "dist/**/*",
       "electron/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@imgly/background-removal-node/**/*",
+      "node_modules/onnxruntime-node/**/*"
     ],
     "win": {
       "icon": "public/brand/pdfly-symbol.png",
