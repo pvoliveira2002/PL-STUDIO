@@ -4,12 +4,55 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const sharp = require('sharp');
 const { pathToFileURL } = require('url');
+const { execFile } = require('child_process');
 
 const imageInputExtensions = new Set(['.jpg','.jpeg','.png','.webp','.avif','.tif','.tiff','.bmp','.gif','.heic','.heif']);
 const imageOutputExtensions = { jpeg:'.jpg',png:'.png',webp:'.webp',avif:'.avif',tiff:'.tiff' };
 
 function validImagePath(filePath) {
   return typeof filePath === 'string' && path.isAbsolute(filePath) && imageInputExtensions.has(path.extname(filePath).toLowerCase());
+}
+
+function validPdfPath(filePath) {
+  return typeof filePath === 'string' && path.isAbsolute(filePath) && path.extname(filePath).toLowerCase() === '.pdf';
+}
+
+function qpdfPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'qpdf', 'qpdf.exe')
+    : path.join(__dirname, '..', 'resources', 'qpdf', 'qpdf.exe');
+}
+
+function runQpdf(args) {
+  return new Promise((resolve) => execFile(qpdfPath(), args, { windowsHide:true, timeout:120000 }, (error, stdout, stderr) => {
+    resolve({ code:typeof error?.code === 'number' ? error.code : 0, stdout:String(stdout||''), stderr:String(stderr||'') });
+  }));
+}
+
+function registerPdfHandlers(){
+  ipcMain.handle('pdf:password-status', async (_event, filePath) => {
+    if(!validPdfPath(filePath)) throw new Error('Arquivo PDF inválido.');
+    const result=await runQpdf(['--requires-password',filePath]);
+    if(result.code===0)return{requiresPassword:true};
+    if(result.code===2||result.code===3)return{requiresPassword:false};
+    throw new Error(result.stderr.trim()||'Não foi possível verificar a proteção do PDF.');
+  });
+  ipcMain.handle('pdf:unlock', async (_event, filePath, password) => {
+    if(!validPdfPath(filePath)) throw new Error('Arquivo PDF inválido.');
+    if(typeof password!=='string'||!password.length)throw new Error('PASSWORD_REQUIRED');
+    const work=await fsp.mkdtemp(path.join(app.getPath('temp'),'pl-studio-pdf-'));
+    const passwordFile=path.join(work,'senha.txt'),output=path.join(work,'documento.pdf');
+    try{
+      await fsp.writeFile(passwordFile,password,{encoding:'utf8',mode:0o600});
+      const result=await runQpdf([`--password-file=${passwordFile}`,'--decrypt',filePath,output]);
+      if(result.code!==0&&result.code!==3){
+        const detail=`${result.stderr}\n${result.stdout}`.toLowerCase();
+        if(detail.includes('invalid password'))throw new Error('PASSWORD_INCORRECT');
+        throw new Error(result.stderr.trim()||'Não foi possível desbloquear o PDF.');
+      }
+      return new Uint8Array(await fsp.readFile(output));
+    }finally{await fsp.rm(work,{recursive:true,force:true})}
+  });
 }
 
 function imagePipeline(filePath, options={}) {
@@ -143,6 +186,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerImageHandlers();
+  registerPdfHandlers();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

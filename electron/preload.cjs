@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('plStudio', {
   openFolder: (folderPath) => ipcRenderer.invoke('image:open-folder', folderPath),
   openDownloads: () => ipcRenderer.invoke('app:open-downloads'),
   removeBackground: (filePath, options) => ipcRenderer.invoke('background:remove', filePath, options),
+  pdfPasswordStatus: (filePath) => ipcRenderer.invoke('pdf:password-status', filePath),
+  unlockPdf: (filePath, password) => ipcRenderer.invoke('pdf:unlock', filePath, password),
 });
