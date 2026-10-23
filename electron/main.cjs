@@ -5,9 +5,13 @@ const fsp = require('fs/promises');
 const sharp = require('sharp');
 const { pathToFileURL } = require('url');
 const { execFile } = require('child_process');
+const { Worker } = require('worker_threads');
+const { runImageBatch } = require('./image-batch.cjs');
 
 const imageInputExtensions = new Set(['.jpg','.jpeg','.png','.webp','.avif','.tif','.tiff','.bmp','.gif','.heic','.heif']);
 const imageOutputExtensions = { jpeg:'.jpg',png:'.png',webp:'.webp',avif:'.avif',tiff:'.tiff' };
+const backgroundInputFormats = new Set(['jpeg','png','webp','tiff']);
+const maxInputFileSize = 100 * 1024 * 1024;
 
 function validImagePath(filePath) {
   return typeof filePath === 'string' && path.isAbsolute(filePath) && imageInputExtensions.has(path.extname(filePath).toLowerCase());
@@ -17,6 +21,39 @@ function validPdfPath(filePath) {
   return typeof filePath === 'string' && path.isAbsolute(filePath) && path.extname(filePath).toLowerCase() === '.pdf';
 }
 
+async function prepareBackgroundInput(filePath) {
+  if(typeof filePath!=='string'||!path.isAbsolute(filePath))throw new Error('Caminho da imagem inválido.');
+  let stats;
+  try{stats=await fsp.stat(filePath)}catch{throw new Error('A imagem selecionada não está mais disponível.')}
+  if(!stats.isFile())throw new Error('O caminho selecionado não é um arquivo.');
+  if(stats.size>maxInputFileSize)throw new Error('A imagem excede o limite de 100 MB.');
+  try{
+    const pipeline=sharp(filePath,{animated:false,failOn:'warning',limitInputPixels:268402689});
+    const metadata=await pipeline.metadata();
+    if(!backgroundInputFormats.has(metadata.format))throw new Error('UNSUPPORTED_FORMAT');
+    return await pipeline.rotate().png().toBuffer();
+  }catch(error){
+    if(error?.message==='UNSUPPORTED_FORMAT')throw new Error('Formato não suportado. Use JPG, PNG, WebP ou TIFF.');
+    throw new Error('Não foi possível ler esta imagem. O arquivo pode estar corrompido ou em um formato não suportado.');
+  }
+}
+
+function runBackgroundRefinement(original, raw, options) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'background-refine-worker.cjs'), {
+      workerData: { original, raw, options },
+    });
+    worker.once('message', (message) => {
+      if (message?.error) reject(new Error(message.error));
+      else resolve(message);
+    });
+    worker.once('error', reject);
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new Error(`O refinamento foi encerrado com o código ${code}.`));
+    });
+  });
+}
+
 function qpdfPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'qpdf', 'qpdf.exe')
@@ -24,12 +61,24 @@ function qpdfPath() {
 }
 
 function runQpdf(args) {
-  return new Promise((resolve) => execFile(qpdfPath(), args, { windowsHide:true, timeout:120000 }, (error, stdout, stderr) => {
-    resolve({ code:typeof error?.code === 'number' ? error.code : 0, stdout:String(stdout||''), stderr:String(stderr||'') });
+  return new Promise((resolve, reject) => execFile(qpdfPath(), args, { windowsHide:true, timeout:120000 }, (error, stdout, stderr) => {
+    if (error && typeof error.code !== 'number') {
+      reject(new Error(error.code === 'ETIMEDOUT' ? 'O QPDF excedeu o tempo limite.' : `Falha ao executar o QPDF: ${error.message}`));
+      return;
+    }
+    resolve({ code:error?.code ?? 0, stdout:String(stdout||''), stderr:String(stderr||'') });
   }));
 }
 
 function registerPdfHandlers(){
+  ipcMain.handle('pdf:srgb-profile', async () => {
+    const colorFolder=path.join(process.env.WINDIR||'C:\\Windows','System32','spool','drivers','color');
+    const candidates=['sRGB Color Space Profile.icm','ewsrgb.icm'];
+    for(const name of candidates){
+      try{return new Uint8Array(await fsp.readFile(path.join(colorFolder,name)))}catch{}
+    }
+    throw new Error('O perfil de cor sRGB do Windows não foi encontrado.');
+  });
   ipcMain.handle('pdf:password-status', async (_event, filePath) => {
     if(!validPdfPath(filePath)) throw new Error('Arquivo PDF inválido.');
     const result=await runQpdf(['--requires-password',filePath]);
@@ -83,40 +132,117 @@ async function availableOutput(folder,base,extension,overwrite){
 }
 
 function registerImageHandlers(){
+  const allowedOutputFolders=new Set();
+  const conversionJobs=new Map();
+  const authorizeFolder=folderPath=>{const normalized=path.resolve(folderPath);allowedOutputFolders.add(normalized.toLowerCase());return normalized};
   ipcMain.handle('app:open-downloads',async()=>await shell.openPath(app.getPath('downloads'))==='');
-  ipcMain.handle('image:choose-output',async()=>{const result=await dialog.showOpenDialog({properties:['openDirectory','createDirectory'],title:'Escolha a pasta de saída'});return result.canceled?'':result.filePaths[0]});
-  ipcMain.handle('image:open-folder',async(_event,folderPath)=>typeof folderPath==='string'?(await shell.openPath(folderPath))==='':false);
+  ipcMain.handle('image:choose-output',async()=>{const result=await dialog.showOpenDialog({properties:['openDirectory','createDirectory'],title:'Escolha a pasta de saída'});return result.canceled?'':authorizeFolder(result.filePaths[0])});
+  ipcMain.handle('image:open-folder',async(_event,folderPath)=>{if(typeof folderPath!=='string'||!path.isAbsolute(folderPath))return false;const normalized=path.resolve(folderPath);if(!allowedOutputFolders.has(normalized.toLowerCase()))return false;try{if(!(await fsp.stat(normalized)).isDirectory())return false}catch{return false}return(await shell.openPath(normalized))===''});
   ipcMain.handle('image:preview',async(_event,filePath,options={})=>{if(!validImagePath(filePath))throw new Error('Arquivo de imagem inválido.');const original=await sharp(filePath).rotate().resize({width:720,height:480,fit:'inside',withoutEnlargement:true}).png().toBuffer();let result=imagePipeline(filePath,options);result=outputPipeline(result,options.format||'jpeg',options.quality,options.lossless);const processed=await result.toBuffer();const thumb=await sharp(processed).resize({width:720,height:480,fit:'inside',withoutEnlargement:true}).png().toBuffer();const metadata=await sharp(processed).metadata();return{original:`data:image/png;base64,${original.toString('base64')}`,result:`data:image/png;base64,${thumb.toString('base64')}`,size:processed.length,width:metadata.width,height:metadata.height}});
-  ipcMain.handle('image:convert',async(_event,payload={})=>{const files=Array.isArray(payload.files)?payload.files.filter(validImagePath):[];if(!files.length)throw new Error('Nenhuma imagem válida foi selecionada.');const options=payload.options||{},format=options.format||'jpeg',extension=imageOutputExtensions[format];if(!extension)throw new Error('Formato de saída inválido.');const outputFolder=payload.outputFolder&&path.isAbsolute(payload.outputFolder)?payload.outputFolder:path.join(path.dirname(files[0]),'PL Studio - Convertidas');await fsp.mkdir(outputFolder,{recursive:true});const results=[];for(const filePath of files){let pipeline=imagePipeline(filePath,options);if(options.keepMetadata)pipeline=pipeline.withMetadata();pipeline=outputPipeline(pipeline,format,options.quality,options.lossless);const suffix=String(options.suffix||'-convertida').replace(/[<>:"/\\|?*\x00-\x1F]/g,'-').slice(0,60);const base=`${path.basename(filePath,path.extname(filePath))}${suffix}`;const destination=await availableOutput(outputFolder,base,extension,Boolean(options.overwrite));await pipeline.toFile(destination);results.push(destination)}return{count:results.length,files:results,outputFolder}});
-  ipcMain.handle('background:remove',async(_event,filePath,options={})=>{
-    if(!validImagePath(filePath))throw new Error('Arquivo de imagem inválido.');
+  ipcMain.handle('image:encode-print-jpeg',async(_event,imageBytes,density=300)=>{
+    const input=Buffer.from(imageBytes||[]);
+    if(!input.length||input.length>80*1024*1024)throw new Error('A folha preparada é inválida ou muito grande.');
+    const dpi=Math.max(72,Math.min(600,Math.round(Number(density)||300)));
+    const metadata=await sharp(input,{limitInputPixels:40000000}).metadata();
+    if(metadata.width!==1748||metadata.height!==1240)throw new Error('As dimensões da folha A6 não correspondem a 148 × 105 mm em 300 DPI.');
+    return new Uint8Array(await sharp(input).withMetadata({density:dpi}).jpeg({quality:95,mozjpeg:true,chromaSubsampling:'4:4:4'}).toBuffer());
+  });
+  ipcMain.handle('image:cancel-conversion',(event,jobId)=>{
+    const job=conversionJobs.get(jobId);
+    if(!job||job.senderId!==event.sender.id)return false;
+    job.cancelled=true;
+    return true;
+  });
+  ipcMain.handle('image:convert',async(event,payload={})=>{
+    const files=Array.isArray(payload.files)?payload.files.filter(validImagePath):[];
+    if(!files.length)throw new Error('Nenhuma imagem válida foi selecionada.');
+    const options=payload.options||{},format=options.format||'jpeg',extension=imageOutputExtensions[format];
+    if(!extension)throw new Error('Formato de saída inválido.');
+    const jobId=typeof payload.jobId==='string'&&payload.jobId.length<=100?payload.jobId:`image-${Date.now()}`;
+    if(conversionJobs.has(jobId))throw new Error('Já existe uma conversão com este identificador.');
+    let outputFolder;
+    if(payload.outputFolder){
+      if(typeof payload.outputFolder!=='string'||!path.isAbsolute(payload.outputFolder))throw new Error('Pasta de saída inválida.');
+      outputFolder=path.resolve(payload.outputFolder);
+      if(!allowedOutputFolders.has(outputFolder.toLowerCase()))throw new Error('Selecione novamente a pasta de saída.');
+    }else outputFolder=path.join(path.dirname(files[0]),'PL Studio - Convertidas');
+    await fsp.mkdir(outputFolder,{recursive:true});
+    authorizeFolder(outputFolder);
+    const job={senderId:event.sender.id,cancelled:false};
+    conversionJobs.set(jobId,job);
+    const notify=payload=>{if(!event.sender.isDestroyed())event.sender.send('image:conversion-progress',{jobId,total:files.length,...payload,fileName:payload.file?.name||''})};
+    try{
+      const batch=await runImageBatch({
+        files:files.map(filePath=>({filePath,name:path.basename(filePath)})),
+        job,
+        notify,
+        convert:async({filePath})=>{
+          const stats=await fsp.stat(filePath);
+          if(!stats.isFile())throw new Error('O caminho não corresponde a um arquivo.');
+          if(stats.size>maxInputFileSize)throw new Error('O arquivo excede o limite de 100 MB.');
+          let pipeline=imagePipeline(filePath,options);
+          if(options.keepMetadata)pipeline=pipeline.withMetadata();
+          pipeline=outputPipeline(pipeline,format,options.quality,options.lossless);
+          const suffix=String(options.suffix||'-convertida').replace(/[<>:"/\\|?*\x00-\x1F]/g,'-').slice(0,60);
+          const base=`${path.basename(filePath,path.extname(filePath))}${suffix}`;
+          const destination=await availableOutput(outputFolder,base,extension,Boolean(options.overwrite));
+          await pipeline.toFile(destination);
+          return destination;
+        }
+      });
+      return{count:batch.results.length,files:batch.results,outputFolder,total:files.length,processed:batch.processed,failed:batch.failures.length,errors:batch.failures.slice(0,100),cancelled:batch.cancelled};
+    }finally{
+      conversionJobs.delete(jobId);
+    }
+  });
+  ipcMain.handle('background:remove',async(event,filePath,options={})=>{
     const {removeBackground}=require('@imgly/background-removal-node');
     const packageRoot=app.isPackaged
       ?path.join(process.resourcesPath,'app.asar.unpacked','node_modules','@imgly','background-removal-node','dist')
       :path.join(__dirname,'..','node_modules','@imgly','background-removal-node','dist');
-    const input=await fsp.readFile(filePath);
-    const extension=path.extname(filePath).toLowerCase();
-    const mime=['.jpg','.jpeg'].includes(extension)?'image/jpeg':extension==='.webp'?'image/webp':extension==='.png'?'image/png':'application/octet-stream';
-    const source=new Blob([input],{type:mime});
-    const result=await removeBackground(source,{publicPath:`${pathToFileURL(packageRoot).href}/`,model:'medium',output:{format:'image/png',quality:1,type:'foreground'}});
-    let buffer=Buffer.from(await result.arrayBuffer());
-    if(options.preserveDetails!==false)buffer=await preserveSmallTransparentDetails(buffer);
-    const finalMetadata=await sharp(buffer).metadata();
-    return{dataUrl:`data:image/png;base64,${buffer.toString('base64')}`,size:buffer.length,width:finalMetadata.width,height:finalMetadata.height};
+    const input=await prepareBackgroundInput(filePath);
+    const source=new Blob([input],{type:'image/png'});
+    const result=await removeBackground(source,{
+      publicPath:`${pathToFileURL(packageRoot).href}/`,
+      model:'medium',
+      output:{format:'image/png',quality:1},
+      progress:(key,current,total)=>event.sender.send('background:progress',{key,current,total})
+    });
+    const rawBuffer=Buffer.from(await result.arrayBuffer());
+    event.sender.send('background:progress',{key:'refinement',current:0,total:1});
+    const refined=await runBackgroundRefinement(input,rawBuffer,{
+      edgeRefine:options.edgeRefine!==false,
+      cleanupLevel:['off','conservative','strong'].includes(options.cleanup)
+        ?{off:0,conservative:1,strong:2}[options.cleanup]
+        :1,
+      portraitCleanup:Boolean(options.portraitCleanup),
+      decontaminate:Boolean(options.decontaminate)
+    });
+    event.sender.send('background:progress',{key:'refinement',current:1,total:1});
+    // preserveDetails agora significa preservar o alpha contínuo produzido pelo
+    // modelo. O preenchimento legado só é usado na comparação de desenvolvimento.
+    const buffer=Buffer.from(refined.finalPng);
+    const encode=value=>`data:image/png;base64,${Buffer.from(value).toString('base64')}`;
+    return{
+      dataUrl:encode(buffer),
+      rawDataUrl:encode(rawBuffer),
+      legacyDataUrl:encode(refined.legacyPng),
+      originalNormalizedDataUrl:encode(input),
+      originalMaskDataUrl:encode(refined.originalMaskPng),
+      refinedMaskDataUrl:encode(refined.refinedMaskPng),
+      size:buffer.length,
+      width:refined.width,
+      height:refined.height,
+      refinement:{
+        model:'medium',
+        edgeRefine:options.edgeRefine!==false,
+        cleanup:options.cleanup||'conservative',
+        portraitCleanup:Boolean(options.portraitCleanup),
+        decontaminate:Boolean(options.decontaminate),
+        preserveDetailsMeaning:'Preserva alpha intermediário; não preenche buracos transparentes.'
+      }
+    };
   });
-}
-
-async function preserveSmallTransparentDetails(pngBuffer){
-  const {data,info}=await sharp(pngBuffer).ensureAlpha().raw().toBuffer({resolveWithObject:true});
-  const {width,height,channels}=info,total=width*height,visited=new Uint8Array(total),queue=new Int32Array(total);
-  const maxArea=Math.max(32,Math.round(total*0.0008));
-  for(let start=0;start<total;start++){
-    if(visited[start]||data[start*channels+3]>24)continue;
-    let head=0,tail=0,touchesBorder=false;queue[tail++]=start;visited[start]=1;
-    while(head<tail){const point=queue[head++],x=point%width,y=Math.floor(point/width);if(x===0||y===0||x===width-1||y===height-1)touchesBorder=true;for(const next of [point-1,point+1,point-width,point+width]){if(next<0||next>=total||visited[next])continue;const nx=next%width,ny=Math.floor(next/width);if(Math.abs(nx-x)+Math.abs(ny-y)!==1||data[next*channels+3]>24)continue;visited[next]=1;queue[tail++]=next}}
-    if(!touchesBorder&&tail<=maxArea)for(let i=0;i<tail;i++)data[queue[i]*channels+3]=255;
-  }
-  return sharp(data,{raw:{width,height,channels}}).png({compressionLevel:9}).toBuffer();
 }
 
 // Alguns computadores corporativos ou com drivers antigos mantêm o processo

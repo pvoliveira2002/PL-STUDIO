@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PDFDocument as PdfLibDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
+import { StandardFonts, degrees, rgb } from 'pdf-lib';
 import JSZip from 'jszip';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -12,53 +12,32 @@ import {
   Eye, PanelTop, Presentation, RotateCw, ScanText, Search, ShieldCheck, Sparkles,
   Plus, Printer, Settings, Split, Stamp, Sun, Trash2, UploadCloud, Wrench, X, Zap
 } from 'lucide-react';
-import ImageStudio from './ImageStudio';
-import BackgroundRemover from './BackgroundRemover';
-import PdfWorkbench from './PdfWorkbench';
 import { preparePdfFiles } from './pdfSecurity';
+import { categories, tools } from './app/toolCatalog';
+import { downloadFile as download, fileStem as stem, findOversizedFile as oversizedFile, formatBytes } from './shared/files';
+import { PDFDocument } from './features/pdf/pdfDocument';
+import { addHistoryEntry, loadHistory } from './features/history/historyRepository';
+import { matchesSearch } from './shared/search';
 import './styles.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
-const PDFDocument={create:(...args)=>PdfLibDocument.create(...args),load:(bytes,options={})=>PdfLibDocument.load(bytes,{ignoreEncryption:true,...options})};
 
-const tools = [
-  { id:'merge', title:'Juntar PDF', desc:'Combine vários PDFs na ordem que quiser.', cat:'Organizar', icon:Combine, tone:'coral', multi:true, accept:'.pdf' },
-  { id:'split', title:'Dividir PDF', desc:'Extraia páginas ou separe o documento inteiro.', cat:'Organizar', icon:Split, tone:'coral', accept:'.pdf' },
-  { id:'compress', title:'Comprimir PDF', desc:'Reduza o tamanho mantendo a melhor qualidade.', cat:'Otimizar', icon:FileArchive, tone:'green', accept:'.pdf' },
-  { id:'pdf-word', title:'PDF para Word', desc:'Transforme o texto do PDF em um DOCX editável.', cat:'Converter', icon:FileText, tone:'blue', accept:'.pdf' },
-  { id:'pdf-ppt', title:'PDF para PowerPoint', desc:'Crie slides PPTX visualmente fiéis ao PDF.', cat:'Converter', icon:Presentation, tone:'orange', accept:'.pdf' },
-  { id:'pdf-excel', title:'PDF para Excel', desc:'Extraia o conteúdo textual para planilhas.', cat:'Converter', icon:FileSpreadsheet, tone:'green', accept:'.pdf' },
-  { id:'word-pdf', title:'Word para PDF', desc:'Converta documentos DOCX para PDF.', cat:'Converter', icon:FileOutput, tone:'blue', accept:'.docx' },
-  { id:'ppt-pdf', title:'PowerPoint para PDF', desc:'Converta o conteúdo textual de PPTX para PDF.', cat:'Converter', icon:Presentation, tone:'orange', accept:'.pptx' },
-  { id:'excel-pdf', title:'Excel para PDF', desc:'Converta planilhas XLS e XLSX para PDF.', cat:'Converter', icon:FileSpreadsheet, tone:'green', accept:'.xls,.xlsx' },
-  { id:'edit', title:'Editar PDF', desc:'Adicione uma anotação de texto ao documento.', cat:'Editar', icon:FilePenLine, tone:'purple', accept:'.pdf' },
-  { id:'pdf-jpg', title:'PDF para JPG', desc:'Transforme páginas de um ou vários PDFs em imagens JPG.', cat:'Converter', icon:Image, tone:'yellow', accept:'.pdf', multi:true },
-  { id:'jpg-pdf', title:'JPG para PDF', desc:'Converta imagens em um único PDF.', cat:'Converter', icon:FileImage, tone:'yellow', accept:'image/jpeg,image/png', multi:true },
-  { id:'sign', title:'Assinar PDF', desc:'Inclua uma assinatura visual no documento.', cat:'Editar', icon:FilePenLine, tone:'navy', accept:'.pdf' },
-  { id:'watermark', title:"Marca d'água", desc:'Aplique texto com posição e transparência.', cat:'Editar', icon:Stamp, tone:'purple', accept:'.pdf' },
-  { id:'rotate', title:'Rodar PDF', desc:'Gire todas as páginas em poucos cliques.', cat:'Organizar', icon:RotateCw, tone:'purple', accept:'.pdf' },
-  { id:'html-pdf', title:'HTML para PDF', desc:'Converta um arquivo HTML ou texto em PDF.', cat:'Converter', icon:PanelTop, tone:'yellow', accept:'.html,.htm,.txt' },
-  { id:'unlock', title:'Desbloquear PDF', desc:'Remova a senha usando a credencial atual.', cat:'Segurança', icon:LockKeyhole, tone:'navy', accept:'.pdf' },
-  { id:'protect', title:'Proteger PDF', desc:'Defina uma senha para proteger o arquivo.', cat:'Segurança', icon:ShieldCheck, tone:'navy', accept:'.pdf' },
-  { id:'organize', title:'Organizar PDF', desc:'Reordene, exclua e selecione páginas.', cat:'Organizar', icon:GripVertical, tone:'coral', accept:'.pdf' },
-  { id:'repair', title:'Reparar PDF', desc:'Reconstrua a estrutura de um PDF danificado.', cat:'Otimizar', icon:Wrench, tone:'green', accept:'.pdf' },
-  { id:'numbers', title:'Números de página', desc:'Numere as páginas com estilo personalizado.', cat:'Editar', icon:Layers3, tone:'purple', accept:'.pdf' },
-  { id:'scan', title:'Digitalizar para PDF', desc:'Capture documentos com a câmera.', cat:'Criar', icon:ScanText, tone:'coral', accept:'image/*', multi:true },
-  { id:'ocr', title:'OCR PDF', desc:'Torne PDFs escaneados pesquisáveis em português.', cat:'Otimizar', icon:ScanText, tone:'green', accept:'.pdf' },
-];
-tools.push(
- { id:'pdf-editor', title:'Editor PDF completo', desc:'Edite páginas, texto, assinatura e marca d’água no mesmo lugar.', cat:'Editar', icon:FilePenLine, tone:'coral', accept:'.pdf' },
- { id:'image-converter', title:'Converter imagens', desc:'Converta, redimensione e otimize imagens em lote.', cat:'Imagens', icon:Images, tone:'coral', accept:'image/*', multi:true },
- { id:'print-a4', title:'Imagens em folha A4', desc:'Distribua várias imagens automaticamente para impressão.', cat:'Impressão', icon:Printer, tone:'blue', accept:'image/jpeg,image/png', multi:true },
- { id:'photo-3x4', title:'Fotos 3x4', desc:'Prepare várias cópias de uma foto em folha A4.', cat:'Impressão', icon:Image, tone:'purple', accept:'image/jpeg,image/png' },
-);
-const featuredIds = ['pdf-editor','merge','compress','pdf-jpg','jpg-pdf','scan'];
-const quickToolIds = ['pdf-editor','compress','split','pdf-jpg','organize','rotate','watermark','numbers'];
-const categories = ['Todas','Imagens','Impressão','Organizar','Converter','Editar','Otimizar','Segurança','Criar'];
+const ImageStudio = lazy(() => import('./ImageStudio'));
+const BackgroundRemover = lazy(() => import('./BackgroundRemover'));
+const PdfWorkbench = lazy(() => import('./PdfWorkbench'));
+const AdvancedPdfWorkspace = lazy(() => import('./AdvancedPdfWorkspace'));
+const PageNumberWorkspace = lazy(() => import('./PageNumberWorkspace'));
+const WatermarkWorkspace = lazy(() => import('./WatermarkWorkspace'));
+const advancedPdfToolIds = new Set(['crop','forms','redact','compare','pdfa','summarize']);
 
-function formatBytes(n){ if(!n) return '0 KB'; const u=['B','KB','MB','GB']; const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3); return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`; }
-function download(bytes,name,type='application/pdf'){ const blob=bytes instanceof Blob?bytes:new Blob([bytes],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500); }
-function stem(name){return name.replace(/\.[^.]+$/,'');}
+function FeatureLoading(){
+ return <div className="feature-loading" role="status"><Sparkles/><strong>Carregando ferramenta...</strong></div>;
+}
+
+function FeatureBoundary({children}){
+ return <Suspense fallback={<FeatureLoading/>}>{children}</Suspense>;
+}
+
 async function readPdfTextAndImages(file,withImages=false){
  const pdf=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const pages=[];
  for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();const lines=[];let lastY=null,current='';for(const item of content.items){const y=Math.round(item.transform?.[5]||0);if(lastY!==null&&Math.abs(y-lastY)>4){if(current.trim())lines.push(current.trim());current=''}current+=`${item.str} `;lastY=y}if(current.trim())lines.push(current.trim());let image=null;if(withImages){const viewport=page.getViewport({scale:1.6});const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;image=canvas.toDataURL('image/jpeg',.88)}pages.push({lines,image})}return pages;
@@ -82,21 +61,38 @@ async function imagesToPptx(images){
  return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
 }
 
-function Header({dark,setDark,onHistory,onOpen,onHome}){
+function Header({dark,setDark,onHistory,onOpen,onHome,query,onQuery,onShowTools}){
+ const conversionGroups=[
+  {title:'Converter em PDF',ids:['jpg-pdf','word-pdf','ppt-pdf','excel-pdf','html-pdf']},
+  {title:'Converter de PDF',ids:['pdf-jpg','pdf-word','pdf-ppt','pdf-excel','pdfa']}
+ ];
+ const plannedTools={
+  translate:{title:'Traduzir PDF',icon:BookOpen,tone:'purple'},
+  markdown:{title:'PDF para Markdown',icon:FileOutput,tone:'purple'}
+ };
+ const allToolsGroups=[
+  {title:'Organizar PDF',items:[{id:'merge'},{id:'split'},{id:'organize',label:'Remover páginas'},{id:'split',label:'Extrair páginas'},{id:'organize'},{id:'scan'}]},
+  {title:'Otimizar PDF',items:[{id:'compress'},{id:'repair'},{id:'ocr'},{id:'summarize'}]},
+  {title:'Converter em PDF',items:[{id:'jpg-pdf'},{id:'word-pdf'},{id:'ppt-pdf'},{id:'excel-pdf'},{id:'html-pdf'}]},
+  {title:'Converter de PDF',items:[{id:'pdf-jpg'},{id:'pdf-word'},{id:'pdf-ppt'},{id:'pdf-excel'},{id:'pdfa'}]},
+  {title:'Editar PDF',items:[{id:'rotate'},{id:'numbers'},{id:'watermark'},{id:'crop'},{id:'pdf-editor',label:'Editar PDF'},{id:'forms'}]},
+  {title:'Segurança do PDF',items:[{id:'unlock'},{id:'protect'},{id:'sign'},{id:'redact'},{id:'compare'}]},
+  {title:'PDF inteligente',items:[{id:'summarize',label:'Resumir PDF'},{planned:'translate'},{planned:'markdown'}]}
+ ];
  return <header className="header"><div className="nav shell">
    <a className="brand pl-brand" href="#" aria-label="Voltar ao início" onClick={e=>{e.preventDefault();onHome?.()}}><span>PL</span><strong>STUDIO</strong></a>
    <nav className="main-menu">
     <button onClick={()=>onOpen(tools.find(t=>t.id==='merge'))}>Juntar PDF</button>
     <button onClick={()=>onOpen(tools.find(t=>t.id==='split'))}>Dividir PDF</button>
     <button onClick={()=>onOpen(tools.find(t=>t.id==='compress'))}>Comprimir PDF</button>
-    <div className="nav-dropdown"><button>Converter PDF <ChevronDown size={14}/></button><div className="dropdown-menu">
-      {tools.filter(t=>t.cat==='Converter').map(t=>{const I=t.icon;return <button key={t.id} disabled={t.cloud} onClick={()=>!t.cloud&&onOpen(t)}><span className={`mini-icon ${t.tone}`}><I/></span><span>{t.title}</span>{t.cloud&&<em>Em breve</em>}</button>})}
+    <div className="nav-dropdown conversion-dropdown"><button>Converter PDF <ChevronDown size={14}/></button><div className="dropdown-menu conversion-menu">
+      {conversionGroups.map(group=><section className="conversion-column" key={group.title}><strong>{group.title}</strong>{group.ids.map(id=>tools.find(tool=>tool.id===id)).filter(Boolean).map(tool=>{const I=tool.icon;return <button key={tool.id} disabled={tool.cloud} onClick={()=>!tool.cloud&&onOpen(tool)}><span className={`mini-icon ${tool.tone}`}><I/></span><span>{tool.title}</span>{tool.cloud&&<em>Em breve</em>}</button>})}</section>)}
     </div></div>
-    <div className="nav-dropdown all-tools"><button>Todas as ferramentas <ChevronDown size={14}/></button><div className="dropdown-menu mega-menu">
-      {categories.slice(1).map(c=><div className="menu-column" key={c}><strong>{c}</strong>{tools.filter(t=>t.cat===c).map(t=><button key={t.id} disabled={t.cloud} onClick={()=>!t.cloud&&onOpen(t)}>{t.title}{t.cloud&&<small>Em breve</small>}</button>)}</div>)}
+    <div className="nav-dropdown all-tools"><button>Todas as ferramentas <ChevronDown size={14}/></button><div className="dropdown-menu mega-menu all-tools-menu">
+      {allToolsGroups.map(group=><section className="all-tools-column" key={group.title}><strong>{group.title}</strong>{group.items.map((item,index)=>{const tool=item.id?tools.find(candidate=>candidate.id===item.id):plannedTools[item.planned];if(!tool)return null;const I=tool.icon,isPlanned=Boolean(item.planned);return <button key={`${group.title}-${item.id||item.planned}-${index}`} disabled={isPlanned||tool.cloud} title={isPlanned?'Planejado para uma próxima etapa':item.label||tool.title} onClick={()=>!isPlanned&&!tool.cloud&&onOpen(tool)}><span className={`mini-icon ${tool.tone}`}><I/></span><span>{item.label||tool.title}</span>{isPlanned&&<em>Planejado</em>}</button>})}</section>)}
     </div></div>
    </nav>
-   <div className="nav-actions"><button className="icon-button" onClick={()=>setDark(!dark)} aria-label="Alternar tema">{dark?<Sun size={19}/>:<Moon size={19}/>}</button><button className="history-btn" onClick={onHistory}><History size={18}/> Histórico</button><button className="avatar">L</button><button className="mobile"><Menu/></button></div>
+   <div className="nav-actions"><label className="pdf-nav-search"><Search/><input value={query} onChange={event=>onQuery(event.target.value)} onFocus={onShowTools} onKeyDown={event=>event.key==='Enter'&&onShowTools()} placeholder="Buscar ferramenta..."/><kbd>Ctrl K</kbd></label><span className="nav-separator"/><button className="icon-button" onClick={()=>setDark(!dark)} aria-label="Alternar tema">{dark?<Sun size={19}/>:<Moon size={19}/>}</button><button className="icon-button" onClick={onHistory} aria-label="Abrir histórico"><History size={18}/></button><button className="avatar pdf-avatar">PL</button><button className="mobile"><Menu/></button></div>
  </div></header>
 }
 
@@ -107,50 +103,67 @@ function Welcome({onChoose}){
   <div className="product-choice-grid">
    <button className="product-choice pdf-product" onClick={()=>onChoose('pdf')}><span className="product-choice-icon"><FileText/></span><span className="product-choice-copy"><small>DOCUMENTOS</small><strong>Editor PDF</strong><p>Converta, edite, organize, proteja e prepare seus arquivos PDF.</p><span className="product-features"><i><Check/> Conversão</i><i><Check/> Organização</i><i><Check/> OCR</i></span></span><span className="product-enter">Abrir Editor PDF <ArrowRight/></span></button>
    <button className="product-choice image-product" onClick={()=>onChoose('images')}><span className="product-choice-icon"><Images/></span><span className="product-choice-copy"><small>IMAGENS</small><strong>Editor de Imagens</strong><p>Converta, redimensione, otimize e prepare fotos para impressão.</p><span className="product-features"><i><Check/> Conversão em lote</i><i><Check/> Folha A4</i><i><Check/> Fotos 3x4</i></span></span><span className="product-enter">Abrir Editor de Imagens <ArrowRight/></span></button>
-   <button className="product-choice remove-product" onClick={()=>onChoose('remove-bg')}><span className="product-choice-icon"><Sparkles/></span><span className="product-choice-copy"><small>INTELIGÊNCIA ARTIFICIAL</small><strong>Remover Fundo</strong><p>Recorte produtos, retratos e objetos automaticamente com um clique.</p><span className="product-features"><i><Check/> Transparência</i><i><Check/> Fundo colorido</i><i><Check/> Alta qualidade</i></span></span><span className="product-enter">Abrir Removedor <ArrowRight/></span></button>
+   <button className="product-choice remove-product" onClick={()=>onChoose('remove-bg')}><span className="product-choice-icon"><Sparkles/></span><span className="product-choice-copy"><small>IMAGEM E IMPRESSÃO</small><strong>Remover fundo e preparar para impressão</strong><p>Remova o fundo, ajuste o recorte e monte uma página A6 paisagem.</p><span className="product-features"><i><Check/> Transparência</i><i><Check/> A6 exato</i><i><Check/> Processamento local</i></span></span><span className="product-enter">Abrir ferramenta <ArrowRight/></span></button>
   </div>
-  <footer className="welcome-footer"><ShieldCheck/> Processamento local e privado <span/> PL Studio 0.4</footer>
+  <footer className="welcome-footer"><ShieldCheck/> Processamento local e privado <span/> PL Studio 0.5 Beta</footer>
  </section>
  </main>
 }
 
-function PdfSidebar({active='home',onHome,onStart,onPdf,onImages,onPrint,onHistory,dark,setDark}){
- return <aside className="product-sidebar"><div className="sidebar-mark" onClick={onHome}><span>PL</span></div><nav><button className={active==='home'?'active':''} onClick={onStart||onHome}><House/><span>Início</span></button><button className={active==='pdf'?'active':''} onClick={onPdf}><FileText/><span>PDF</span></button><button className={active==='images'?'active':''} onClick={onImages}><Images/><span>Imagens</span></button><button className={active==='print'?'active':''} onClick={onPrint}><Printer/><span>Impressão</span></button><button onClick={onHistory}><History/><span>Histórico</span></button></nav><button className="sidebar-settings" onClick={()=>setDark(!dark)}><Settings/><span>{dark?'Tema claro':'Tema escuro'}</span></button></aside>
+function PdfSidebar({active='home',onHome,onStart,onPdf,onImages,onHistory,dark,setDark}){
+ return <aside className="product-sidebar" aria-label="Navegação principal"><div className="sidebar-mark" onClick={onHome}><span>PL</span></div><nav><button title="Página inicial" className={active==='home'?'active':''} onClick={onStart||onHome}><House/><span>Início</span></button><button title="Ferramentas PDF" className={active==='pdf'?'active':''} onClick={onPdf}><FileText/><span>PDF</span></button><button title="Imagens e impressão" className={active==='images'?'active':''} onClick={onImages}><Images/><span>Imagens</span></button><button title="Histórico local" className={active==='history'?'active':''} onClick={onHistory}><History/><span>Histórico</span></button></nav><button title={dark?'Usar tema claro':'Usar tema escuro'} className="sidebar-settings" onClick={()=>setDark(!dark)}><Settings/><span>{dark?'Tema claro':'Tema escuro'}</span></button></aside>
 }
 
-function Hero({onPick}){
+function ImageCategory({onChoose}){
+ const choices=[
+  {id:'image-converter',eyebrow:'CONVERTER',title:'Conversor de imagens',desc:'Converta e otimize várias imagens de uma só vez.',icon:Images,tone:'coral'},
+  {id:'remove-bg',eyebrow:'RECORTE',title:'Remover fundo',desc:'Remova o fundo e prepare a imagem para impressão.',icon:Sparkles,tone:'purple'},
+  {id:'print-a4',eyebrow:'IMPRESSÃO',title:'Imagens em folha A4',desc:'Organize várias imagens automaticamente em páginas A4.',icon:Printer,tone:'blue'},
+  {id:'photo-3x4',eyebrow:'DOCUMENTOS',title:'Fotos 3x4',desc:'Enquadre a pessoa e monte cartelas prontas para imprimir.',icon:Image,tone:'yellow'},
+ ];
+ return <div className="image-category-content"><header><div className="pl-wordmark"><span>PL</span><strong>STUDIO</strong></div><div><strong>Imagens</strong><small>Conversão, recorte e impressão</small></div></header><main><span className="section-tag">IMAGENS E IMPRESSÃO</span><h1>O que você quer fazer?</h1><p>Escolha uma ferramenta. A área de trabalho abrirá sem menus laterais para aproveitar melhor a tela.</p><div className="image-category-grid">{choices.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>onChoose(item.id)}><span className={`image-category-icon ${item.tone}`}><Icon/></span><span><small>{item.eyebrow}</small><strong>{item.title}</strong><p>{item.desc}</p></span><ArrowRight/></button>})}</div></main></div>;
+}
+
+function Hero({onPick,onBrowse}){
  const input=useRef(); const [drag,setDrag]=useState(false);
  const take=(fs)=>{if(fs?.length) onPick(tools[0],Array.from(fs))};
- return <section className="hero"><div className="orb orb1"/><div className="orb orb2"/><div className="shell hero-inner">
-   <div className="eyebrow"><Zap size={14} fill="currentColor"/> Rápido, seguro e gratuito</div>
-   <h1>Documentos e imagens, <span>do seu jeito.</span></h1>
-   <p>Converta, edite, organize e prepare impressões em um único programa para o seu dia a dia.</p>
-   <div className={`dropzone ${drag?'drag':''}`} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);take(e.dataTransfer.files)}}>
-    <input ref={input} type="file" accept=".pdf" multiple hidden onChange={e=>take(e.target.files)}/>
-    <div className="upload-icon"><UploadCloud size={29}/></div><div><strong>Arraste seus PDFs aqui</strong><small>ou selecione os arquivos no seu dispositivo</small></div>
-    <button onClick={()=>input.current.click()}>Selecionar arquivos <ArrowRight size={17}/></button>
-   </div>
-   <div className="trust"><span><ShieldCheck/> Arquivos processados com segurança</span><span><Zap/> Processamento rápido</span><span><BadgeCheck/> Sem marcas d’água</span></div>
+ return <section className="pdf-dashboard-hero"><div className="pdf-hero-grid shell">
+   <div className="pdf-hero-copy"><div className="eyebrow"><Sparkles size={14}/> Editor de PDF</div><h1>Tudo que você faz com <span>PDF, em um só lugar.</span></h1><p><strong>Ferramentas rápidas, seguras e gratuitas</strong> para editar, converter, unir, comprimir e muito mais.</p><div className="pdf-trust"><span><i><ShieldCheck/></i>Processamento<br/>local e privado</span><span><i><Zap/></i>Sem cadastro<br/>necessário</span><span><i><LockKeyhole/></i>Seus arquivos<br/>sempre seguros</span></div></div>
+   <div className={`pdf-dashboard-drop ${drag?'drag':''}`} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);take(e.dataTransfer.files)}}><input ref={input} type="file" accept=".pdf" multiple hidden onChange={e=>take(e.target.files)}/><span className="pdf-upload-orb"><UploadCloud/></span><strong>Arraste seus PDFs aqui</strong><small>ou clique para selecionar um ou vários arquivos</small><button onClick={()=>input.current.click()}><FolderOpen/> Escolher PDF <ArrowRight/></button><em><LockKeyhole/> Seus arquivos são processados localmente no computador.</em></div>
+   <aside className="pdf-hero-side"><button onClick={onBrowse}><span><Zap/></span><span><strong>Dica rápida</strong><small>Converta, edite e organize seus PDFs com apenas alguns cliques.</small></span><ChevronRight/></button><div className="pdf-hero-art"><span className="art-file"><b>PDF</b><i/><i/><i/></span><span className="art-tile pdf">PDF</span><span className="art-tile word">W</span><span className="art-tile excel">X</span><span className="art-tile image">▧</span><span className="art-tile ppt">P</span></div></aside>
  </div></section>
 }
 
-function ToolCard({tool,onOpen,featured=false}){const Icon=tool.icon;return <button className={`tool-card ${featured?'featured-card':''} ${tool.cloud?'planned':''}`} onClick={()=>!tool.cloud&&onOpen(tool)} disabled={tool.cloud}>
+function ToolCard({tool,onOpen,featured=false}){const Icon=tool.icon;return <button className={`tool-card ${featured?'featured-card':''} ${tool.cloud?'planned':''}`} onClick={()=>!tool.cloud&&onOpen(tool)} disabled={tool.cloud} aria-label={`${tool.title}. ${tool.desc}`}>
  <span className={`tool-icon ${tool.tone}`}><Icon size={featured?25:22}/></span><span className="tool-copy"><strong>{tool.title}</strong><small>{tool.desc}</small></span>{tool.cloud&&<span className="coming-soon">Em breve</span>}<ChevronRight className="card-arrow" size={19}/>{featured&&!tool.cloud&&<span className="try">Usar agora <ArrowRight size={15}/></span>}
  </button>}
 
-function QuickActions({files,onChoose,onClose}){
+function QuickActions({files,onChoose,onBrowse,onClose}){
  const totalSize=files.reduce((sum,file)=>sum+file.size,0);
  const [pageCount,setPageCount]=useState(null);
  useEffect(()=>{let alive=true;if(files.length===1&&files[0].type==='application/pdf') (async()=>PDFDocument.load(await files[0].arrayBuffer()))().then(doc=>alive&&setPageCount(doc.getPageCount())).catch(()=>{});return()=>{alive=false}},[files]);
- const editor=tools.find(t=>t.id==='pdf-editor'),quick=tools.filter(t=>quickToolIds.includes(t.id)&&t.id!=='pdf-editor');
- const suggestions=files.length>1?[tools.find(t=>t.id==='merge'),editor,...quick]:[editor,...quick];
+ const multiple=files.length>1,suggestionIds=multiple?['merge','pdf-jpg']:['pdf-editor','compress','split','pdf-jpg'];
+ const suggestions=suggestionIds.map(id=>tools.find(tool=>tool.id===id)).filter(Boolean);
+ const conversionTools=['pdf-jpg','pdf-word','pdf-ppt','pdf-excel','pdfa'].map(id=>tools.find(tool=>tool.id===id)).filter(Boolean);
+ const quickActionGroups=[
+  {title:'Organizar',ids:['merge','split','organize','rotate']},
+  {title:'Editar',ids:['pdf-editor','watermark','numbers','crop','forms']},
+  {title:'Otimizar',ids:['compress','repair','ocr','summarize']},
+  {title:'Segurança',ids:['protect','unlock','sign','redact','compare']},
+ ];
+ const chooseById=id=>{const tool=tools.find(item=>item.id===id);if(tool)onChoose(tool)};
  return <div className="modal-backdrop quick-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className="quick-actions">
   <button className="close" onClick={onClose}><X/></button>
-  <div className="quick-heading"><span className="selected-check"><Check/></span><div><span className="modal-kicker">Arquivo pronto</span><h2>O que você quer fazer?</h2><p>Escolha uma ferramenta para continuar com {files.length>1?'os arquivos selecionados':'o seu PDF'}.</p></div></div>
+  <div className="quick-heading"><span className="selected-check"><Check/></span><div><span className="modal-kicker">{multiple?'Vários PDFs detectados':'PDF pronto'}</span><h2>{multiple?'Como deseja trabalhar com esses arquivos?':'O que você quer fazer com este PDF?'}</h2><p>{multiple?'Juntar é a opção recomendada, mas você continua no controle.':'Mostramos apenas as ações mais úteis para começar.'}</p></div></div>
   <div className="selected-summary"><Files/><div><strong>{files.length===1?files[0].name:`${files.length} arquivos selecionados`}</strong><small>{files.length===1?`${formatBytes(totalSize)} · ${pageCount?`${pageCount} página${pageCount===1?'':'s'}`:'analisando páginas...'}`:`${formatBytes(totalSize)} no total`}</small></div><span><Check/> Carregado</span></div>
-  <div className="quick-label">Ferramentas recomendadas</div>
-  <div className="quick-grid">{suggestions.map(tool=>{const Icon=tool.icon;return <button key={tool.id} onClick={()=>onChoose(tool)}><span className={`tool-icon ${tool.tone}`}><Icon/></span><span><strong>{tool.title}</strong><small>{tool.desc}</small></span><ChevronRight/></button>})}</div>
-  <button className="choose-other" onClick={()=>{onClose();setTimeout(()=>document.querySelector('#tools')?.scrollIntoView({behavior:'smooth'}),50)}}>Ver todas as ferramentas <ArrowRight/></button>
+  <div className="quick-fixed-block"><div className="quick-label">Ações do PDF</div><nav className="quick-fixed-actions" aria-label="Ações principais para o PDF selecionado">
+   <button onClick={()=>chooseById('merge')}><Combine/> Juntar PDF</button>
+   <button onClick={()=>chooseById('split')}><Split/> Dividir PDF</button>
+   <div className="quick-action-dropdown"><button aria-haspopup="true"><FileOutput/> Converter PDF <ChevronDown/></button><div className="quick-action-popover quick-convert-popover"><strong>Converter este PDF</strong>{conversionTools.map(tool=>{const Icon=tool.icon;return <button key={tool.id} onClick={()=>onChoose(tool)}><span className={`mini-icon ${tool.tone}`}><Icon/></span><span><b>{tool.title}</b><small>{tool.desc}</small></span><ChevronRight/></button>})}</div></div>
+   <div className="quick-action-dropdown quick-all-actions"><button aria-haspopup="true"><Files/> Todas as ferramentas <ChevronDown/></button><div className="quick-action-popover quick-all-popover"><div className="quick-all-grid">{quickActionGroups.map(group=><section key={group.title}><strong>{group.title}</strong>{group.ids.map(id=>tools.find(tool=>tool.id===id)).filter(Boolean).map(tool=>{const Icon=tool.icon;return <button key={tool.id} onClick={()=>onChoose(tool)}><Icon/><span>{tool.title}</span></button>})}</section>)}</div><button className="quick-open-catalog" onClick={()=>{onClose();onBrowse?.()}}>Abrir catálogo completo <ArrowRight/></button></div></div>
+  </nav></div>
+  <div className="quick-label">Recomendado para sua seleção</div>
+  <div className="quick-grid">{suggestions.map((tool,index)=>{const Icon=tool.icon;return <button className={index===0?'recommended':''} key={tool.id} onClick={()=>onChoose(tool)}><span className={`tool-icon ${tool.tone}`}><Icon/></span><span className="quick-copy"><span className="quick-title"><strong>{tool.title}</strong>{index===0&&<em>Recomendado</em>}</span><small>{tool.desc}</small></span><ChevronRight/></button>})}</div>
  </section></div>
 }
 
@@ -171,7 +184,7 @@ function PageOrganizer({file,onClose,onDone}){
 function PageOrganizerV2({file,onClose,onDone}){
  const input=useRef(),originalPages=useRef([]),[documents,setDocuments]=useState([]),[pages,setPages]=useState([]),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false),[progress,setProgress]=useState(0),[dragged,setDragged]=useState(null),[result,setResult]=useState(null),[error,setError]=useState('');
  const palette=['#ff7d82','#59cbd8','#8b78e8','#f2b84b','#64bc77','#e88dc0'];
- const addFiles=async fileList=>{const incoming=Array.from(fileList||[]).filter(item=>item?.name?.toLowerCase().endsWith('.pdf'));if(!incoming.length)return;setLoading(true);setError('');try{for(const sourceFile of incoming){const fileId=`${Date.now()}-${Math.random()}`,color=palette[(documents.length+originalPages.current.filter((p,i,a)=>a.findIndex(x=>x.fileId===p.fileId)===i).length)%palette.length],data=new Uint8Array(await sourceFile.arrayBuffer()),pdf=await pdfjs.getDocument({data}).promise,newPages=[];for(let i=1;i<=pdf.numPages;i++){const pdfPage=await pdf.getPage(i),viewport=pdfPage.getViewport({scale:.34}),canvas=window.document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);const context=canvas.getContext('2d',{alpha:false});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);await pdfPage.render({canvasContext:context,viewport}).promise;newPages.push({id:`${fileId}-${i}`,fileId,source:i-1,number:i,rotation:0,thumb:canvas.toDataURL('image/jpeg',.84),color,name:sourceFile.name})}const sourceDocument={id:fileId,file:sourceFile,name:sourceFile.name,color,count:newPages.length};setDocuments(current=>[...current,sourceDocument]);originalPages.current.push(...newPages.map(page=>({...page})));setPages(current=>[...current,...newPages])}}catch(e){setError(e.message||'Não foi possível abrir um dos PDFs.')}finally{setLoading(false);if(input.current)input.current.value=''}};
+ const addFiles=async fileList=>{const incoming=Array.from(fileList||[]).filter(item=>item?.name?.toLowerCase().endsWith('.pdf'));if(!incoming.length)return;const tooLarge=oversizedFile(incoming);if(tooLarge){setError(`O arquivo "${tooLarge.name}" excede o limite de 100 MB.`);return}setLoading(true);setError('');try{for(const sourceFile of incoming){const fileId=`${Date.now()}-${Math.random()}`,color=palette[(documents.length+originalPages.current.filter((p,i,a)=>a.findIndex(x=>x.fileId===p.fileId)===i).length)%palette.length],data=new Uint8Array(await sourceFile.arrayBuffer()),pdf=await pdfjs.getDocument({data}).promise,newPages=[];for(let i=1;i<=pdf.numPages;i++){const pdfPage=await pdf.getPage(i),viewport=pdfPage.getViewport({scale:.34}),canvas=window.document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);const context=canvas.getContext('2d',{alpha:false});context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);await pdfPage.render({canvasContext:context,viewport}).promise;newPages.push({id:`${fileId}-${i}`,fileId,source:i-1,number:i,rotation:0,thumb:canvas.toDataURL('image/jpeg',.84),color,name:sourceFile.name})}const sourceDocument={id:fileId,file:sourceFile,name:sourceFile.name,color,count:newPages.length};setDocuments(current=>[...current,sourceDocument]);originalPages.current.push(...newPages.map(page=>({...page})));setPages(current=>[...current,...newPages])}}catch(e){setError(e.message||'Não foi possível abrir um dos PDFs.')}finally{setLoading(false);if(input.current)input.current.value=''}};
  useEffect(()=>{if(file)addFiles([file])},[file]);
  const move=(from,to)=>{if(from===null||from===to)return;setPages(current=>{const next=[...current],[item]=next.splice(from,1);next.splice(to,0,item);return next})};
  const rotate=id=>setPages(current=>current.map(page=>page.id===id?{...page,rotation:(page.rotation+90)%360}:page));
@@ -225,8 +238,8 @@ function Workspace({tool,initialFiles,onClose,onDone}){
  const [files,setFiles]=useState(initialFiles||[]), [busy,setBusy]=useState(false), [error,setError]=useState(''),[progress,setProgress]=useState(0);
  const [range,setRange]=useState('1'), [rotation,setRotation]=useState('90'), [mark,setMark]=useState('CONFIDENCIAL'), [position,setPosition]=useState('bottom'), [quality,setQuality]=useState('balanced'), [imageScale,setImageScale]=useState('2'),[password,setPassword]=useState(''),[customText,setCustomText]=useState('');
  const input=useRef(); const Icon=tool.icon;
- useEffect(()=>setFiles(initialFiles||[]),[initialFiles,tool]);
- const add=async(list)=>{try{const incoming=await preparePdfFiles(list);setFiles(v=>tool.multi?[...v,...incoming]:[incoming[0]])}catch(e){setError(e.message||'Não foi possível abrir o arquivo.')}};
+ useEffect(()=>{const tooLarge=oversizedFile(initialFiles);if(tooLarge){setFiles([]);setError(`O arquivo "${tooLarge.name}" excede o limite de 100 MB.`)}else setFiles(initialFiles||[])},[initialFiles,tool]);
+ const add=async(list)=>{try{const tooLarge=oversizedFile(list);if(tooLarge)throw new Error(`O arquivo "${tooLarge.name}" excede o limite de 100 MB.`);const incoming=await preparePdfFiles(list);setFiles(v=>tool.multi?[...v,...incoming]:[incoming[0]])}catch(e){setError(e.message||'Não foi possível abrir o arquivo.')}};
  const remove=i=>setFiles(v=>v.filter((_,x)=>x!==i));
  async function process(){
   if(tool.cloud){setError('Esta ferramenta estará disponível em uma próxima versão.');return}
@@ -289,33 +302,40 @@ function Workspace({tool,initialFiles,onClose,onDone}){
 }
 
 function App(){
- const [product,setProduct]=useState(null),[dark,setDark]=useState(()=>localStorage.getItem('pl-studio-theme')==='dark'),[query,setQuery]=useState(''),[cat,setCat]=useState('Todas'),[active,setActive]=useState(null),[initial,setInitial]=useState([]),[quickFiles,setQuickFiles]=useState([]),[history,setHistory]=useState(()=>JSON.parse(localStorage.getItem('pl-studio-history')||localStorage.getItem('pdfly-history')||'[]')),[historyOpen,setHistoryOpen]=useState(false),[passwordRequest,setPasswordRequest]=useState(null);
+ const [product,setProduct]=useState(null),[dark,setDark]=useState(()=>localStorage.getItem('pl-studio-theme')==='dark'),[query,setQuery]=useState(''),[cat,setCat]=useState('Todas'),[active,setActive]=useState(null),[initial,setInitial]=useState([]),[quickFiles,setQuickFiles]=useState([]),[history,setHistory]=useState(loadHistory),[historyOpen,setHistoryOpen]=useState(false),[passwordRequest,setPasswordRequest]=useState(null);
+ const [toolsExpanded,setToolsExpanded]=useState(false);
+ const searchInput=useRef(null);
  useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('pl-studio-theme',dark?'dark':'light')},[dark]);
- const filtered=useMemo(()=>tools.filter(t=>(cat==='Todas'||t.cat===cat)&&(`${t.title} ${t.desc}`.toLowerCase().includes(query.toLowerCase()))),[query,cat]);
+ useEffect(()=>{const onKeyDown=event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();if(product!=='pdf')setProduct('pdf');setToolsExpanded(true);setTimeout(()=>{document.getElementById('tools')?.scrollIntoView({behavior:'smooth',block:'start'});searchInput.current?.focus()},100);return}if(event.key==='Escape'){if(passwordRequest)setPasswordRequest(null);else if(historyOpen)setHistoryOpen(false);else if(quickFiles.length)setQuickFiles([])}};window.addEventListener('keydown',onKeyDown);return()=>window.removeEventListener('keydown',onKeyDown)},[product,passwordRequest,historyOpen,quickFiles.length]);
+ const filtered=useMemo(()=>tools.filter(t=>(cat==='Todas'||t.cat===cat)&&matchesSearch(`${t.title} ${t.desc} ${t.cat}`,query)),[query,cat]);
  const launch=(tool,files=[])=>{setActive(tool);setInitial(files)};
- const open=async(tool,files=[])=>{const pdf=files.find(file=>file?.name?.toLowerCase().endsWith('.pdf'));if(pdf&&window.plStudio?.pdfPasswordStatus){try{const filePath=window.plStudio.pathForFile(pdf),status=await window.plStudio.pdfPasswordStatus(filePath);if(status.requiresPassword){setPasswordRequest({tool,files,file:pdf,filePath,password:'',error:'',busy:false,visible:false});return}}catch(e){console.warn('Não foi possível verificar a senha do PDF:',e)}}launch(tool,files)};
- const unlockRequestedPdf=async()=>{const request=passwordRequest;if(!request?.password||request.busy)return;setPasswordRequest(value=>({...value,busy:true,error:''}));try{const bytes=await window.plStudio.unlockPdf(request.filePath,request.password),unlocked=new File([bytes],request.file.name,{type:'application/pdf',lastModified:request.file.lastModified}),files=request.files.map(file=>file===request.file?unlocked:file);setPasswordRequest(null);launch(request.tool,files)}catch(e){const message=String(e?.message||e);setPasswordRequest(value=>({...value,busy:false,error:message.includes('PASSWORD_INCORRECT')?'Senha incorreta. Confira e tente novamente.':'Não foi possível desbloquear este PDF.'}))}};
- const record=(tool,files,size)=>{const next=[{id:Date.now(),tool:tool.title,file:files.map(f=>f.name).join(', '),date:new Date().toLocaleString('pt-BR'),size},...history].slice(0,20);setHistory(next);localStorage.setItem('pl-studio-history',JSON.stringify(next))};
+ const open=async(tool,files=[])=>{const tooLarge=oversizedFile(files);if(tooLarge){window.alert(`O arquivo "${tooLarge.name}" excede o limite de 100 MB.`);return}if(window.plStudio?.pdfPasswordStatus){for(const pdf of files.filter(file=>file?.name?.toLowerCase().endsWith('.pdf'))){const filePath=window.plStudio.pathForFile(pdf);if(!filePath)continue;try{const status=await window.plStudio.pdfPasswordStatus(filePath);if(status.requiresPassword){setPasswordRequest({tool,files,file:pdf,filePath,password:'',error:'',busy:false,visible:false});return}}catch(e){console.warn('Não foi possível verificar a senha do PDF:',e)}}}launch(tool,files)};
+ const unlockRequestedPdf=async()=>{const request=passwordRequest;if(!request?.password||request.busy)return;setPasswordRequest(value=>({...value,busy:true,error:''}));try{const bytes=await window.plStudio.unlockPdf(request.filePath,request.password),unlocked=new File([bytes],request.file.name,{type:'application/pdf',lastModified:request.file.lastModified}),files=request.files.map(file=>file===request.file?unlocked:file);setPasswordRequest(null);await open(request.tool,files)}catch(e){const message=String(e?.message||e);setPasswordRequest(value=>({...value,busy:false,error:message.includes('PASSWORD_INCORRECT')?'Senha incorreta. Confira e tente novamente.':'Não foi possível desbloquear este PDF.'}))}};
+ const record=(tool,files,size)=>setHistory(current=>addHistoryEntry(current,tool,files,size));
  const done=(tool,files,size)=>{record(tool,files,size);setTimeout(()=>setActive(null),350)};
+ const revealTools=(scroll=false)=>{setToolsExpanded(true);if(scroll)setTimeout(()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth',block:'start'}),60)};
+ const removeHistoryItem=id=>setHistory(current=>{const next=current.filter(item=>item.id!==id);localStorage.setItem('pl-studio-history',JSON.stringify(next));return next});
  if(!product)return <Welcome onChoose={setProduct}/>;
- const openPdfCategory=value=>{setProduct('pdf');setCat(value);setTimeout(()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth'}),80)};
- const sharedSidebar=active=><PdfSidebar active={active} onHome={()=>setProduct(null)} onStart={()=>setProduct(null)} onPdf={()=>openPdfCategory('Todas')} onImages={()=>setProduct('images')} onPrint={()=>openPdfCategory('Impressão')} onHistory={()=>setHistoryOpen(true)} dark={dark} setDark={setDark}/>;
- if(product==='images')return <div className="utility-with-sidebar">{sharedSidebar('images')}<ImageStudio mode="converter" onClose={()=>setProduct(null)} onDone={(count,size)=>record(tools.find(t=>t.id==='image-converter'),[{name:`${count} imagem(ns)`}],size||0)}/></div>;
- if(product==='remove-bg')return <div className="utility-with-sidebar">{sharedSidebar('images')}<BackgroundRemover onClose={()=>setProduct(null)} onDone={(file,size)=>record({title:'Remover fundo'},[file],size||0)}/></div>;
- return <><div className="pdf-product-layout">{sharedSidebar(cat==='Impressão'?'print':cat==='Todas'?'home':'pdf')}<div className="pdf-product-content"><Header dark={dark} setDark={setDark} onHistory={()=>setHistoryOpen(true)} onOpen={open} onHome={()=>setProduct(null)}/><Hero onPick={(_,files)=>setQuickFiles(files)}/>
-  <main>
-   <section className="counter-shortcuts shell"><div><span className="section-tag">Atalhos do balcão</span><h2>Ações rápidas para o atendimento</h2></div><div>{[tools.find(t=>t.id==='pdf-editor'),tools.find(t=>t.id==='word-pdf'),tools.find(t=>t.id==='scan'),tools.find(t=>t.id==='pdf-jpg'),tools.find(t=>t.id==='merge')].map(t=>{const I=t.icon;return <button key={t.id} onClick={()=>open(t)}><span className={`mini-icon ${t.tone}`}><I/></span><strong>{t.title}</strong><ArrowRight/></button>})}</div></section>
-   <section id="featured" className="section shell"><div className="section-head"><div><span className="section-tag">Comece por aqui</span><h2>Ferramentas mais usadas</h2><p>Tudo que você precisa para trabalhar com seus PDFs.</p></div></div><div className="featured-grid">{tools.filter(t=>featuredIds.includes(t.id)).map(t=><ToolCard key={t.id} tool={t} onOpen={open} featured/>)}</div></section>
-   {history.length>0&&<section className="recent-section shell"><div className="section-head row"><div><span className="section-tag">Atividade recente</span><h2>Últimos trabalhos</h2></div><button onClick={()=>setHistoryOpen(true)}>Ver histórico <ArrowRight/></button></div><div className="recent-cards">{history.slice(0,4).map(item=><article key={item.id}><span><FileText/></span><div><strong>{item.tool}</strong><small>{item.file}</small><em>{item.date}</em></div><button onClick={()=>open(tools.find(t=>t.title===item.tool)||tools[0])}>Repetir</button></article>)}</div></section>}
-   <section id="tools" className="section tools-section"><div className="shell"><div className="section-head row"><div><span className="section-tag">Caixa de ferramentas</span><h2>Todas as ferramentas</h2></div><div className="search"><Search/><input placeholder="Buscar ferramenta..." value={query} onChange={e=>setQuery(e.target.value)}/>{query&&<button onClick={()=>setQuery('')}><X/></button>}</div></div>
-   <div className="chips">{categories.map(c=><button className={cat===c?'active':''} onClick={()=>setCat(c)} key={c}>{c}</button>)}</div>
-   {cat==='Todas'&&!query?<div className="tool-groups">{categories.filter(c=>!['Todas','Imagens','Impressão'].includes(c)).map(group=><section key={group}><header><span>{group}</span><small>{tools.filter(t=>t.cat===group).length} ferramentas</small></header><div className="tools-grid">{tools.filter(t=>t.cat===group).map(t=><ToolCard key={t.id} tool={t} onOpen={open}/>)}</div></section>)}</div>:<div className="tools-grid">{filtered.map(t=><ToolCard key={t.id} tool={t} onOpen={open}/>)}</div>}{!filtered.length&&<div className="empty"><Search/><h3>Nenhuma ferramenta encontrada</h3><p>Tente buscar por outro termo.</p></div>}</div></section>
-   <section id="security" className="security shell"><div><span className="security-icon"><ShieldCheck/></span><div><span className="section-tag">Privacidade em primeiro lugar</span><h2>Seus documentos são seus.</h2><p>As ferramentas compatíveis processam tudo localmente no navegador. Nenhum arquivo precisa sair do seu dispositivo.</p></div></div><div className="security-points"><span><Check/> Processamento local</span><span><Check/> Sem cadastro</span><span><Check/> Downloads imediatos</span></div></section>
+ const openPdfCategory=value=>{setProduct('pdf');setCat(value);setToolsExpanded(true);setTimeout(()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth'}),80)};
+ const sharedSidebar=active=><PdfSidebar active={active} onHome={()=>setProduct(null)} onStart={()=>setProduct(null)} onPdf={()=>openPdfCategory('Todas')} onImages={()=>setProduct('images')} onHistory={()=>{setProduct('pdf');setHistoryOpen(true)}} dark={dark} setDark={setDark}/>;
+ if(product==='images')return <div className="pdf-product-layout">{sharedSidebar('images')}<ImageCategory onChoose={setProduct}/></div>;
+ if(['image-converter','print-a4','photo-3x4'].includes(product))return <FeatureBoundary><ImageStudio mode={product==='image-converter'?'converter':product==='print-a4'?'a4':'photo'} onClose={()=>setProduct('images')} onDone={(count,size)=>record(tools.find(t=>t.id===product),[{name:`${count} imagem(ns)`}],size||0)}/></FeatureBoundary>;
+ if(product==='remove-bg')return <FeatureBoundary><BackgroundRemover onClose={()=>setProduct('images')} onDone={(file,size)=>record({title:'Remover fundo e preparar A6'},[file],size||0)}/></FeatureBoundary>;
+ return <><div className="pdf-dashboard"><div className="pdf-product-content pdf-dashboard-content"><Header dark={dark} setDark={setDark} onHistory={()=>setHistoryOpen(true)} onOpen={open} onHome={()=>setProduct(null)} query={query} onQuery={value=>{setQuery(value);setToolsExpanded(true)}} onShowTools={()=>revealTools(false)}/><Hero onPick={(_,files)=>setQuickFiles(files)} onBrowse={()=>revealTools(true)}/>
+  <main className="pdf-dashboard-main">
+   <section className="pdf-most-used shell"><header><h2>Ferramentas mais usadas</h2><button onClick={()=>revealTools(true)}>Ver todas as ferramentas <ArrowRight/></button></header><div className="pdf-favorites">{[tools.find(t=>t.id==='pdf-editor'),tools.find(t=>t.id==='merge'),tools.find(t=>t.id==='compress'),tools.find(t=>t.id==='pdf-jpg')].map(t=>{const I=t.icon;return <button className={`pdf-favorite ${t.tone}`} key={t.id} onClick={()=>open(t)}><span className="pdf-favorite-icon"><I/></span><span><strong>{t.title}</strong><small>{t.desc}</small></span><i><ArrowRight/></i></button>})}</div></section>
+   <section className="pdf-tool-finder shell"><div className="pdf-finder-copy"><span><Search/></span><div><strong>Precisa de outra ferramenta?</strong><small>Digite o que você quer fazer com seu PDF e encontre a ferramenta ideal.</small></div></div><label><Search/><input ref={searchInput} aria-label="Buscar ferramenta" placeholder="Ex.: converter para Word, proteger PDF..." value={query} onChange={event=>{setQuery(event.target.value);setToolsExpanded(true)}} onKeyDown={event=>event.key==='Enter'&&revealTools(true)}/><button type="button" onClick={()=>revealTools(true)}>Buscar ferramenta <ArrowRight/></button></label></section>
+   <section className="pdf-recent shell"><header><h2>Documentos recentes</h2><button onClick={()=>setHistoryOpen(true)}>Ver histórico completo <ArrowRight/></button></header><div className="pdf-recent-table"><div className="pdf-recent-head"><span>Nome do arquivo</span><span>Ação realizada</span><span>Data</span><span>Tamanho</span><span>Ações</span></div>{history.length?history.slice(0,4).map(item=><div className="pdf-recent-row" key={item.id}><span className="pdf-recent-file"><i><FileText/></i><strong title={item.file}>{item.file}</strong></span><span><em>{item.tool}</em></span><span>{item.date}</span><span>{formatBytes(item.size)}</span><span className="pdf-recent-actions"><button title="Repetir ação" onClick={()=>open(tools.find(t=>t.title===item.tool)||tools[0])}><RotateCw/></button><button title="Abrir pasta de downloads" onClick={()=>window.plStudio?.openDownloads()}><FolderOpen/></button><button title="Remover do histórico" onClick={()=>removeHistoryItem(item.id)}><Trash2/></button></span></div>):<div className="pdf-recent-empty"><History/><span><strong>Nenhum documento recente</strong><small>Os arquivos processados localmente aparecerão aqui.</small></span></div>}</div></section>
+   {toolsExpanded&&<section id="tools" className="section tools-section"><div className="shell"><div className="section-head row"><div><span className="section-tag">Caixa de ferramentas</span><h2>Todas as ferramentas</h2></div><div className="tool-search-actions"><button className="collapse-tools" onClick={()=>{setToolsExpanded(false);setQuery('');setCat('Todas')}}>Ocultar</button><div className="search"><Search/><input aria-label="Buscar ferramenta" placeholder="Buscar por nome ou função..." value={query} onChange={e=>setQuery(e.target.value)}/>{query?<button onClick={()=>{setQuery('');searchInput.current?.focus()}} aria-label="Limpar busca"><X/></button>:<kbd>Ctrl K</kbd>}</div></div></div>
+   <div className="chips" aria-label="Filtrar ferramentas por categoria">{categories.map(c=><button className={cat===c?'active':''} aria-pressed={cat===c} onClick={()=>setCat(c)} key={c}>{c}</button>)}</div>
+   {(cat!=='Todas'||query)&&<div className="filter-summary" aria-live="polite"><span><strong>{filtered.length}</strong> {filtered.length===1?'ferramenta encontrada':'ferramentas encontradas'}{query&&<> para “{query}”</>}</span><button onClick={()=>{setQuery('');setCat('Todas')}}>Limpar filtros</button></div>}
+   {cat==='Todas'&&!query?<div className="tool-groups">{categories.filter(c=>!['Todas','Imagens','Impressão'].includes(c)).map(group=><section key={group}><header><span>{group}</span><small>{tools.filter(t=>t.cat===group).length} ferramentas</small></header><div className="tools-grid">{tools.filter(t=>t.cat===group).map(t=><ToolCard key={t.id} tool={t} onOpen={open}/>)}</div></section>)}</div>:<div className="tools-grid">{filtered.map(t=><ToolCard key={t.id} tool={t} onOpen={open}/>)}</div>}{!filtered.length&&<div className="empty"><Search/><h3>Nenhuma ferramenta encontrada</h3><p>Tente outro termo ou remova os filtros ativos.</p><button className="empty-reset" onClick={()=>{setQuery('');setCat('Todas')}}>Mostrar todas as ferramentas</button></div>}</div></section>}
+   <div className="privacy-inline shell"><ShieldCheck/><span><strong>Seus arquivos permanecem no seu computador.</strong> O processamento compatível é feito localmente.</span></div>
   </main><footer><div className="shell"><a className="brand pl-brand"><span>PL</span><strong>STUDIO</strong></a><p>Ferramentas simples para documentos, imagens e impressão.</p><span>© 2026 PL Studio</span></div></footer></div></div>
-  {active&&(active.id==='pdf-editor'?<PdfWorkbench initialFile={initial[0]} onClose={()=>setActive(null)} onDone={(file,size)=>record(active,[file],size)}/>:['image-converter','print-a4','photo-3x4'].includes(active.id)?<ImageStudio mode={active.id==='image-converter'?'converter':active.id==='print-a4'?'a4':'photo'} onClose={()=>setActive(null)} onDone={(count,size)=>record(active,[{name:`${count} imagem(ns)`}],size||0)}/>:active.id==='organize'?<PageOrganizerV2 file={initial[0]} onClose={()=>setActive(null)} onDone={record}/>:<Workspace tool={active} initialFiles={initial} onClose={()=>setActive(null)} onDone={done}/>)}
-  {!!quickFiles.length&&<QuickActions files={quickFiles} onClose={()=>setQuickFiles([])} onChoose={tool=>{const files=quickFiles;setQuickFiles([]);open(tool,files)}}/>}
+  {active&&(active.id==='pdf-editor'?<PdfWorkbench initialFile={initial[0]} onClose={()=>setActive(null)} onDone={(file,size)=>record(active,[file],size)}/>:active.id==='numbers'?<PageNumberWorkspace tool={active} initialFile={initial[0]} onClose={()=>setActive(null)} onDone={record}/>:active.id==='watermark'?<WatermarkWorkspace tool={active} initialFile={initial[0]} onClose={()=>setActive(null)} onDone={record}/>:advancedPdfToolIds.has(active.id)?<AdvancedPdfWorkspace tool={active} initialFiles={initial} onClose={()=>setActive(null)} onDone={record}/>:['image-converter','print-a4','photo-3x4'].includes(active.id)?<ImageStudio mode={active.id==='image-converter'?'converter':active.id==='print-a4'?'a4':'photo'} onClose={()=>setActive(null)} onDone={(count,size)=>record(active,[{name:`${count} imagem(ns)`}],size||0)}/>:active.id==='organize'?<PageOrganizerV2 file={initial[0]} onClose={()=>setActive(null)} onDone={record}/>:<Workspace tool={active} initialFiles={initial} onClose={()=>setActive(null)} onDone={done}/>)}
+  {!!quickFiles.length&&<QuickActions files={quickFiles} onClose={()=>setQuickFiles([])} onBrowse={()=>{setToolsExpanded(true);setTimeout(()=>document.querySelector('#tools')?.scrollIntoView({behavior:'smooth'}),50)}} onChoose={tool=>{const files=quickFiles;setQuickFiles([]);open(tool,files)}}/>}
   {passwordRequest&&<div className="modal-backdrop pdf-password-backdrop"><section className="pdf-password-dialog" role="dialog" aria-modal="true" aria-labelledby="pdf-password-title"><button className="close" onClick={()=>setPasswordRequest(null)} aria-label="Fechar"><X/></button><span className="pdf-password-icon"><LockKeyhole/></span><span className="section-tag">PDF PROTEGIDO</span><h2 id="pdf-password-title">Digite a senha do arquivo</h2><p><strong>{passwordRequest.file.name}</strong> exige uma senha para continuar. Ela será usada somente durante esta operação.</p><label><span>Senha do PDF</span><div><input autoFocus type={passwordRequest.visible?'text':'password'} value={passwordRequest.password} onChange={e=>setPasswordRequest(value=>({...value,password:e.target.value,error:''}))} onKeyDown={e=>e.key==='Enter'&&unlockRequestedPdf()} placeholder="Digite a senha"/><button type="button" onClick={()=>setPasswordRequest(value=>({...value,visible:!value.visible}))} title={passwordRequest.visible?'Ocultar senha':'Mostrar senha'}><Eye/></button></div></label>{passwordRequest.error&&<div className="pdf-password-error">{passwordRequest.error}</div>}<footer><button onClick={()=>setPasswordRequest(null)}>Cancelar</button><button className="process" disabled={!passwordRequest.password||passwordRequest.busy} onClick={unlockRequestedPdf}>{passwordRequest.busy?'Verificando...':<><LockKeyhole/> Desbloquear e continuar</>}</button></footer><small><ShieldCheck/> A senha não é armazenada no computador nem adicionada ao histórico.</small></section></div>}
   {historyOpen&&<div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setHistoryOpen(false)}><section className="workspace history-panel"><button className="close" onClick={()=>setHistoryOpen(false)}><X/></button><div className="workspace-icon blue"><History/></div><h2>Histórico local</h2><p>Conversões concluídas neste navegador.</p><button className="open-downloads" onClick={()=>window.plStudio?.openDownloads()}><FolderOpen/> Abrir pasta Downloads</button>{history.length?<div className="history-list">{history.map(h=><div key={h.id}><PackageCheck/><span><strong>{h.tool}</strong><small>{h.file} · {h.date}</small></span><em>{formatBytes(h.size)}</em><button onClick={()=>{setHistoryOpen(false);open(tools.find(t=>t.title===h.tool)||tools[0])}}>Repetir</button></div>)}</div>:<div className="empty"><History/><h3>Nenhuma conversão ainda</h3><p>Seus arquivos processados aparecerão aqui.</p></div>} {history.length>0&&<button className="clear-history" onClick={()=>{setHistory([]);localStorage.removeItem('pl-studio-history')}}><Trash2/> Limpar histórico</button>}</section></div>}
  </>;
 }
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<FeatureBoundary><App/></FeatureBoundary>);
