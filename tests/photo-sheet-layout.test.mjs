@@ -31,6 +31,22 @@ test('folha A6 comporta oito fotos de alicate 3,2 x 4 cm sem alterar suas medida
   }
 });
 
+test('folha A6 comporta oito fotos padrão 3 x 4 cm sem alterar suas medidas', () => {
+  const layout = createPhotoSheetLayout({
+    page: 'a6',
+    photoWidth: 30,
+    photoHeight: 40,
+    copies: 8,
+  });
+  assert.equal(layout.columns, 4);
+  assert.equal(layout.rows, 2);
+  assert.equal(layout.positions.length, 8);
+  for (const position of layout.positions) {
+    assert.equal(position.width, 30);
+    assert.equal(position.height, 40);
+  }
+});
+
 test('medida maior que a folha A6 é rejeitada sem redimensionamento oculto', () => {
   const layout = createPhotoSheetLayout({
     page: 'a6',

@@ -1,7 +1,7 @@
 {
   "name": "pl-studio",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "Conversor e organizador de PDFs para Windows",
@@ -57,7 +57,7 @@
     "productName": "PL Studio",
     "asar": true,
     "directories": {
-      "output": "PL-Studio-1.0.1-Windows"
+      "output": "PL-Studio-1.0.2-Windows"
     },
     "files": [
       "dist/**/*",

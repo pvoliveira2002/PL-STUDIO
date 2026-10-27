@@ -39,10 +39,17 @@ import { createPhotoSheetLayout } from "./features/images/photoSheetLayout";
 
 const A6 = { width: 148, height: 105 };
 const CUTTER_PRESET = { width: 3.2, height: 4 };
+const PHOTO_SIZE_PRESETS = [
+  { id: "standard", label: "Foto 3 × 4", width: 3, height: 4 },
+  { id: "cutter", label: "Alicate 3,2 × 4", ...CUTTER_PRESET },
+];
 const CUT_MARK_GAP_MM = 0.35;
 const CUT_MARK_LENGTH_MM = 1.5;
 const formatMillimeters = (centimeters) =>
   Number((Number(centimeters) * 10).toFixed(1)).toLocaleString("pt-BR");
+const matchesPhotoPreset = (preset, width, height) =>
+  Math.abs(width - preset.width) < 0.001 &&
+  Math.abs(height - preset.height) < 0.001;
 const drawExternalCutMarks = (ctx, x, y, width, height, pxPerMm) => {
   const gap = CUT_MARK_GAP_MM * pxPerMm,
     length = CUT_MARK_LENGTH_MM * pxPerMm,
@@ -1868,15 +1875,28 @@ export default function BackgroundRemover({ onClose, onDone }) {
                 </div>
                 <aside className="photo-sheet-options">
                   <strong>Tamanho de cada foto</strong>
-                  <button
-                    className="cutter-preset"
-                    onClick={() => {
-                      setPhotoWidth(CUTTER_PRESET.width);
-                      setPhotoHeight(CUTTER_PRESET.height);
-                    }}
-                  >
-                    Meu alicate · 3,2 × 4 cm
-                  </button>
+                  <div className="photo-size-presets">
+                    {PHOTO_SIZE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={
+                          matchesPhotoPreset(
+                            preset,
+                            photoWidth,
+                            photoHeight,
+                          )
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() => {
+                          setPhotoWidth(preset.width);
+                          setPhotoHeight(preset.height);
+                        }}
+                      >
+                        {preset.label} cm
+                      </button>
+                    ))}
+                  </div>
                   <div className="dimension-row">
                     <label>
                       Largura
@@ -1917,7 +1937,7 @@ export default function BackgroundRemover({ onClose, onDone }) {
                   </div>
                   <small>
                     A foto final mede {formatMillimeters(photoWidth)} × {formatMillimeters(photoHeight)} mm. As marcas ficam fora da área cortada
-                    para não aparecerem após usar o alicate.
+                    para não aparecerem após o corte.
                   </small>
                   <small className="cutter-print-tip">
                     Na impressão, escolha A6, Tamanho real ou 100% e desative
