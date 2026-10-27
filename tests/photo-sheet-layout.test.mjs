@@ -12,10 +12,10 @@ test('A6 paisagem em 300 DPI possui 1748 por 1240 pixels', () => {
   assert.equal(mmToPixels(A6_LANDSCAPE_MM.height), 1240);
 });
 
-test('folha A6 comporta oito fotos 3x4 sem alterar suas medidas', () => {
+test('folha A6 comporta oito fotos de alicate 3,2 x 4 cm sem alterar suas medidas', () => {
   const layout = createPhotoSheetLayout({
     page: 'a6',
-    photoWidth: 30,
+    photoWidth: 32,
     photoHeight: 40,
     copies: 8,
   });
@@ -24,7 +24,7 @@ test('folha A6 comporta oito fotos 3x4 sem alterar suas medidas', () => {
   assert.equal(layout.capacity, 8);
   assert.equal(layout.positions.length, 8);
   for (const position of layout.positions) {
-    assert.equal(position.width, 30);
+    assert.equal(position.width, 32);
     assert.equal(position.height, 40);
     assert.ok(position.x >= 0 && position.x + position.width <= 148);
     assert.ok(position.y >= 0 && position.y + position.height <= 105);

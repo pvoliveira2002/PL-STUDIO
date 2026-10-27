@@ -6919,6 +6919,15 @@ footer .shell > span {
   flex-direction: column;
   gap: 10px;
 }
+.cutter-print-tip {
+  display: block;
+  padding: 9px 10px;
+  border: 1px solid #f0d7a2;
+  border-radius: 8px;
+  background: #fff9e9;
+  color: #75591b !important;
+  line-height: 1.45;
+}
 .photo-sheet-options > strong {
   font-size: 10px;
 }

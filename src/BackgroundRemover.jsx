@@ -35,9 +35,39 @@ import {
   trimTransparentImage,
 } from "./features/background-removal/imageProcessing";
 import { clamp } from "./shared/math";
+import { createPhotoSheetLayout } from "./features/images/photoSheetLayout";
 
 const A6 = { width: 148, height: 105 };
 const CUTTER_PRESET = { width: 3.2, height: 4 };
+const CUT_MARK_GAP_MM = 0.35;
+const CUT_MARK_LENGTH_MM = 1.5;
+const formatMillimeters = (centimeters) =>
+  Number((Number(centimeters) * 10).toFixed(1)).toLocaleString("pt-BR");
+const drawExternalCutMarks = (ctx, x, y, width, height, pxPerMm) => {
+  const gap = CUT_MARK_GAP_MM * pxPerMm,
+    length = CUT_MARK_LENGTH_MM * pxPerMm,
+    right = x + width,
+    bottom = y + height;
+  ctx.save();
+  ctx.beginPath();
+  ctx.strokeStyle = "#8f949d";
+  ctx.lineWidth = Math.max(1, 0.12 * pxPerMm);
+  [
+    [x - gap - length, y, x - gap, y],
+    [x, y - gap - length, x, y - gap],
+    [right + gap, y, right + gap + length, y],
+    [right, y - gap - length, right, y - gap],
+    [x - gap - length, bottom, x - gap, bottom],
+    [x, bottom + gap, x, bottom + gap + length],
+    [right + gap, bottom, right + gap + length, bottom],
+    [right, bottom + gap, right, bottom + gap + length],
+  ].forEach(([x1, y1, x2, y2]) => {
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+  });
+  ctx.stroke();
+  ctx.restore();
+};
 const acceptedExtensions = new Set(["jpg", "jpeg", "png", "jfif"]);
 const friendlyError = (error) =>
   String(error?.message || error || "").replace(
@@ -838,47 +868,46 @@ export default function BackgroundRemover({ onClose, onDone }) {
     canvas.height = Math.round(A6.height * pxPerMm);
     const ctx = canvas.getContext("2d"),
       image = await loadImage(layoutResult),
-      itemW = photoWidth * 10,
-      itemH = photoHeight * 10,
-      gapX = Math.max(2, (A6.width - itemW * 4) / 5),
-      gapY = Math.max(2, (A6.height - itemH * 2) / 3),
-      startX = (A6.width - (itemW * 4 + gapX * 3)) / 2,
-      startY = (A6.height - (itemH * 2 + gapY)) / 2;
+      sheetLayout = createPhotoSheetLayout({
+        page: "a6",
+        photoWidth: photoWidth * 10,
+        photoHeight: photoHeight * 10,
+        copies: 8,
+      });
+    if (sheetLayout.positions.length !== 8)
+      throw new Error("As medidas informadas não comportam 8 fotos na folha A6.");
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    for (let row = 0; row < 2; row += 1) {
-      for (let column = 0; column < 4; column += 1) {
-        const x = (startX + column * (itemW + gapX)) * pxPerMm,
-          y = (startY + row * (itemH + gapY)) * pxPerMm,
-          boxW = itemW * pxPerMm,
-          boxH = itemH * pxPerMm,
-          scale = Math.min(
-            boxW / image.naturalWidth,
-            boxH / image.naturalHeight,
-          ),
-          drawW = image.naturalWidth * scale,
-          drawH = image.naturalHeight * scale,
-          drawX = x + (boxW - drawW) / 2,
-          drawY = y + (boxH - drawH) / 2;
-        ctx.save();
-        ctx.translate(drawX, drawY);
-        drawWithContour(
-          ctx,
-          image,
-          drawW,
-          drawH,
-          contour,
-          contourColor,
-          contourWidth * pxPerMm,
-        );
-        ctx.restore();
-        if (!contour) {
-          ctx.strokeStyle = "#c8c8c8";
-          ctx.lineWidth = Math.max(1, 0.15 * pxPerMm);
-          ctx.strokeRect(x, y, boxW, boxH);
-        }
-      }
-    }
+    sheetLayout.positions.forEach((position) => {
+      const x = position.x * pxPerMm,
+        y = position.y * pxPerMm,
+        boxW = position.width * pxPerMm,
+        boxH = position.height * pxPerMm,
+        scale = Math.max(
+          boxW / image.naturalWidth,
+          boxH / image.naturalHeight,
+        ),
+        drawW = image.naturalWidth * scale,
+        drawH = image.naturalHeight * scale,
+        drawX = x + (boxW - drawW) / 2,
+        drawY = y + (boxH - drawH) / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, boxW, boxH);
+      ctx.clip();
+      ctx.translate(drawX, drawY);
+      drawWithContour(
+        ctx,
+        image,
+        drawW,
+        drawH,
+        contour,
+        contourColor,
+        contourWidth * pxPerMm,
+      );
+      ctx.restore();
+      drawExternalCutMarks(ctx, x, y, boxW, boxH, pxPerMm);
+    });
     return canvas;
   };
 
@@ -904,7 +933,9 @@ export default function BackgroundRemover({ onClose, onDone }) {
       );
       const blob = pdf.output("blob");
       downloadBlob(blob, `${fileStem(file.name)}-cartela-8-fotos.pdf`);
-      setSuccess("Cartela com 8 fotos gerada em A6 paisagem.");
+      setSuccess(
+        `Cartela A6 gerada com 8 fotos finais de ${formatMillimeters(photoWidth)} × ${formatMillimeters(photoHeight)} mm e marcas externas.`,
+      );
       onDone?.(file, blob.size);
     } catch (err) {
       setError(friendlyError(err));
@@ -939,7 +970,7 @@ export default function BackgroundRemover({ onClose, onDone }) {
         "image/jpeg",
       );
       setSuccess(
-        "JPG A6 gerado em 148 × 105 mm, 1748 × 1240 px e 300 DPI.",
+        `JPG A6 gerado em 300 DPI, com fotos finais de ${formatMillimeters(photoWidth)} × ${formatMillimeters(photoHeight)} mm e sem borda interna.`,
       );
       onDone?.(file, blob.size);
     } catch (err) {
@@ -1885,8 +1916,12 @@ export default function BackgroundRemover({ onClose, onDone }) {
                     </label>
                   </div>
                   <small>
-                    A proporção da foto é preservada. Caso sobre espaço, ele
-                    ficará branco para evitar distorção.
+                    A foto final mede {formatMillimeters(photoWidth)} × {formatMillimeters(photoHeight)} mm. As marcas ficam fora da área cortada
+                    para não aparecerem após usar o alicate.
+                  </small>
+                  <small className="cutter-print-tip">
+                    Na impressão, escolha A6, Tamanho real ou 100% e desative
+                    “Ajustar imagem à moldura”.
                   </small>
                   <div className="sheet-stage-actions">
                     <button onClick={() => setPhotoStage(2)}>
