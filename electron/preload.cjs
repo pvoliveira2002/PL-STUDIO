@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('plStudio', {
     return () => ipcRenderer.removeListener('background:progress', listener);
   },
   getSrgbProfile: () => ipcRenderer.invoke('pdf:srgb-profile'),
+  readPdfFile: (filePath) => ipcRenderer.invoke('pdf:read-file', filePath),
   pdfPasswordStatus: (filePath) => ipcRenderer.invoke('pdf:password-status', filePath),
   unlockPdf: (filePath, password) => ipcRenderer.invoke('pdf:unlock', filePath, password),
 });

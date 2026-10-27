@@ -71,6 +71,14 @@ function runQpdf(args) {
 }
 
 function registerPdfHandlers(){
+  ipcMain.handle('pdf:read-file', async (_event, filePath) => {
+    if(!validPdfPath(filePath))throw new Error('Arquivo PDF inválido.');
+    let stats;
+    try{stats=await fsp.stat(filePath)}catch{throw new Error('O PDF selecionado não está mais disponível. Se ele veio do WhatsApp, e-mail ou de uma pasta temporária, salve-o no computador e selecione novamente.')}
+    if(!stats.isFile())throw new Error('O caminho selecionado não é um arquivo PDF.');
+    if(stats.size>maxInputFileSize)throw new Error('O PDF excede o limite de 100 MB.');
+    try{return new Uint8Array(await fsp.readFile(filePath))}catch{throw new Error('O Windows não permitiu ler este PDF. Feche o programa que está usando o arquivo ou salve uma cópia em outra pasta.')}
+  });
   ipcMain.handle('pdf:srgb-profile', async () => {
     const colorFolder=path.join(process.env.WINDIR||'C:\\Windows','System32','spool','drivers','color');
     const candidates=['sRGB Color Space Profile.icm','ewsrgb.icm'];
