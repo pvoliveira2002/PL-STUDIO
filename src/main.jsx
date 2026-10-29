@@ -10,7 +10,7 @@ import {
   FilePlus2, FileSpreadsheet, FileText, Files, FolderOpen, GripVertical, History, Image, Images,
   Layers3, LockKeyhole, Menu, MonitorCheck, Moon, MoreHorizontal, PackageCheck,
   Eye, PanelTop, Presentation, RotateCw, ScanText, Search, ShieldCheck, Sparkles,
-  Plus, Printer, Split, Stamp, Sun, Trash2, UploadCloud, Wrench, X, Zap
+  Plus, Printer, QrCode, Split, Stamp, Sun, Trash2, UploadCloud, Wrench, X, Zap
 } from 'lucide-react';
 import { preparePdfFiles } from './pdfSecurity';
 import { categories, tools } from './app/toolCatalog';
@@ -28,6 +28,7 @@ const PdfWorkbench = lazy(() => import('./PdfWorkbench'));
 const AdvancedPdfWorkspace = lazy(() => import('./AdvancedPdfWorkspace'));
 const PageNumberWorkspace = lazy(() => import('./PageNumberWorkspace'));
 const WatermarkWorkspace = lazy(() => import('./WatermarkWorkspace'));
+const PixStudio = lazy(() => import('./PixStudio'));
 const advancedPdfToolIds = new Set(['crop','forms','redact','compare','pdfa','summarize']);
 
 async function readPdfBytes(file){
@@ -110,8 +111,9 @@ function Welcome({onChoose}){
    <button className="product-choice pdf-product" onClick={()=>onChoose('pdf')}><span className="product-choice-icon"><FileText/></span><span className="product-choice-copy"><small>DOCUMENTOS</small><strong>Editor PDF</strong><p>Converta, edite, organize, proteja e prepare seus arquivos PDF.</p><span className="product-features"><i><Check/> Conversão</i><i><Check/> Organização</i><i><Check/> OCR</i></span></span><span className="product-enter">Abrir Editor PDF <ArrowRight/></span></button>
    <button className="product-choice image-product" onClick={()=>onChoose('images')}><span className="product-choice-icon"><Images/></span><span className="product-choice-copy"><small>IMAGENS</small><strong>Editor de Imagens</strong><p>Converta, redimensione, otimize e prepare fotos para impressão.</p><span className="product-features"><i><Check/> Conversão em lote</i><i><Check/> Folha A4</i><i><Check/> Fotos 3x4</i></span></span><span className="product-enter">Abrir Editor de Imagens <ArrowRight/></span></button>
    <button className="product-choice remove-product" onClick={()=>onChoose('remove-bg')}><span className="product-choice-icon"><Sparkles/></span><span className="product-choice-copy"><small>IMAGEM E IMPRESSÃO</small><strong>Remover fundo e preparar para impressão</strong><p>Remova o fundo, ajuste o recorte e monte uma página A6 paisagem.</p><span className="product-features"><i><Check/> Transparência</i><i><Check/> A6 exato</i><i><Check/> Processamento local</i></span></span><span className="product-enter">Abrir ferramenta <ArrowRight/></span></button>
-  </div>
-  <footer className="welcome-footer"><ShieldCheck/> Processamento local e privado <span/> PL Studio 0.5 Beta</footer>
+   <button className="product-choice pix-product" onClick={()=>onChoose('pix')}><span className="product-choice-icon"><QrCode/></span><span className="product-choice-copy"><small>PAGAMENTOS E IMPRESSÃO</small><strong>Pix e QR Code</strong><p>Gere QR Codes Pix, personalize placas e prepare folhas A4 para impressão.</p><span className="product-features"><i><Check/> Pix Copia e Cola</i><i><Check/> PNG e PDF</i><i><Check/> 100% local</i></span></span><span className="product-enter">Abrir Gerador Pix <ArrowRight/></span></button>
+   </div>
+   <footer className="welcome-footer"><ShieldCheck/> Processamento local e privado <span/> PL Studio 0.5 Beta</footer>
  </section>
  </main>
 }
@@ -332,6 +334,7 @@ function App(){
  if(product==='images')return <ImageCategory onChoose={setProduct} onBack={()=>setProduct(null)}/>;
  if(['image-converter','print-a4','photo-3x4'].includes(product))return <FeatureBoundary><ImageStudio mode={product==='image-converter'?'converter':product==='print-a4'?'a4':'photo'} onClose={()=>setProduct('images')} onDone={(count,size)=>record(tools.find(t=>t.id===product),[{name:`${count} imagem(ns)`}],size||0)}/></FeatureBoundary>;
  if(product==='remove-bg')return <FeatureBoundary><BackgroundRemover onClose={()=>setProduct('images')} onDone={(file,size)=>record({title:'Remover fundo e preparar A6'},[file],size||0)}/></FeatureBoundary>;
+ if(product==='pix')return <FeatureBoundary><PixStudio onClose={()=>setProduct(null)} onDone={(file,size)=>record({title:'Pix e QR Code'},[file],size||0)}/></FeatureBoundary>;
  return <><div className="pdf-dashboard"><div className="pdf-product-content pdf-dashboard-content"><Header dark={dark} setDark={setDark} onHistory={()=>setHistoryOpen(true)} onOpen={open} onHome={()=>setProduct(null)} query={query} onQuery={value=>{setQuery(value);setToolsExpanded(true)}} onShowTools={()=>revealTools(false)}/><Hero onPick={(_,files)=>setQuickFiles(files)} onBrowse={()=>revealTools(true)}/>
   <main className="pdf-dashboard-main">
    <section className="pdf-most-used shell"><header><h2>Ferramentas mais usadas</h2><button onClick={()=>revealTools(true)}>Ver todas as ferramentas <ArrowRight/></button></header><div className="pdf-favorites">{[tools.find(t=>t.id==='pdf-editor'),tools.find(t=>t.id==='merge'),tools.find(t=>t.id==='compress'),tools.find(t=>t.id==='pdf-jpg')].map(t=>{const I=t.icon;return <button className={`pdf-favorite ${t.tone}`} key={t.id} onClick={()=>open(t)}><span className="pdf-favorite-icon"><I/></span><span><strong>{t.title}</strong><small>{t.desc}</small></span><i><ArrowRight/></i></button>})}</div></section>
